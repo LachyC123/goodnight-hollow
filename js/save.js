@@ -4,7 +4,7 @@
 // only ever have to add fields here.
 
 const SAVE_KEY = 'goodnightHollowSave';
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 import { defaultStoryState } from './story.js';
 
@@ -19,6 +19,8 @@ export function defaultSave() {
     nights: 0,               // total runs attempted (win or lose)
     nightsCleared: 0,        // highest night beaten
     keepsakes: {},           // permanent unlocks, by id (see upgrades.js)
+    thread: 0,               // persistent currency, spent at the Candle Cradle
+    cradle: {},              // Candle Cradle permanent upgrades, by id (see upgrades.js)
     memoriesSeen: {},        // memory rooms witnessed, by night
     dollKillsTotal: 0,
     metElsie: false,
@@ -79,6 +81,9 @@ function migrate(s) {
     s.story = Object.assign(defaultStoryState(), s.story);
     s.story.children = Object.assign(defaultStoryState().children, s.story.children);
   }
+  // v4: Thread currency + Candle Cradle permanent upgrades
+  if (typeof s.thread !== 'number') s.thread = 0;
+  if (!s.cradle) s.cradle = {};
   s.version = SAVE_VERSION;
   return s;
 }

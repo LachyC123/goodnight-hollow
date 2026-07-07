@@ -10,7 +10,7 @@ import { W, H, TS, COLS, ROWS, OX, OY, overlap, dist, solidAt } from './world.js
 import { NIGHTS, LAST_NIGHT, PRETENDS, KEEPSAKE_ORDER } from './nights.js';
 import { loadSave, writeSave } from './save.js';
 import { RunState } from './run.js';
-import { computeMods, PRETEND_EFFECTS } from './upgrades.js';
+import { computeMods, PRETEND_EFFECTS, CRADLE_UPGRADES } from './upgrades.js';
 import { attachDebug } from './debug.js';
 import { StoryManager } from './story.js';
 import { DialogueManager, ELSIE_FIRST_WAKE, nannyIntroLines, NANNY_DEFEAT_LINES } from './storyDialogue.js';
@@ -42,7 +42,7 @@ class Game {
 
   // combined keepsake + pretend modifiers; recomputed whenever either changes
   refreshMods() {
-    this.mods = computeMods(this.save.keepsakes, this.run ? this.run.pretends : []);
+    this.mods = computeMods(this.save.keepsakes, this.run ? this.run.pretends : [], this.save.cradle);
     if (this.player) {
       this.player.maxStitches = this.player.baseMaxStitches + this.mods.bonusMaxStitches;
       this.player.stitches = Math.min(this.player.stitches, this.player.maxStitches);
@@ -134,6 +134,7 @@ class Game {
     const cx = 14 * TS, cy = 7 * TS;
     this.pickups.push({ kind: 'flame', x: cx - 8, y: cy });
     this.pickups.push({ kind: 'stitch', x: cx + 8, y: cy });
+    this.pickups.push({ kind: 'thread', x: cx, y: cy - 12 });
     this.player.gainFlame(20);
     if (this.mods.healOnRoomClear) this.player.heal(this.mods.healOnRoomClear);
     if (!this.run.pretendOffered && this.room.type === 'combat') {
@@ -155,6 +156,7 @@ class Game {
     this.room.doorsOpen = false;
     this.story.onBossDefeated(this.nightData.bossKind);
     this.pickups.push({ kind: this.nightData.keepsake, keepsake: true, x: 14 * TS, y: 7 * TS });
+    for (let i = 0; i < 3; i++) this.pickups.push({ kind: 'thread', x: (12 + i * 2) * TS, y: 9 * TS });
     const lines = [];
     if (this.nightData.bossKind === 'nanny') lines.push(...NANNY_DEFEAT_LINES);
     lines.push({ who: '', text: this.nightData.dropText });
@@ -214,6 +216,7 @@ class Game {
       case 'dorm': this.updateDorm(dt); break;
       case 'run': this.updateRun(dt); break;
       case 'pretendChoice': this.updatePretendChoice(dt); break;
+      case 'cradle': this.updateCradle(dt); break;
       case 'memoryScene': this.updateMemoryScene(dt); break;
       case 'dying':
         this.deathT -= dt;
@@ -265,6 +268,7 @@ class Game {
     for (const o of HUB_OBJECTS) {
       if (!o.visible(this.story.state)) continue;
       if (dist(this.player, hubObjectPos(o)) < 18 && Input.interact()) {
+        if (o.action) { o.action(this); Sfx.talk(); break; }
         this.dialogue.say(o.lines);
         Sfx.talk();
         break;
@@ -382,6 +386,7 @@ class Game {
         Sfx.pickup();
         if (p.kind === 'flame') this.player.gainFlame(25);
         else if (p.kind === 'stitch') this.player.heal(1 * this.mods.healMult);
+        else if (p.kind === 'thread') { this.save.thread++; this.persist(); }
         else if (p.keepsake) {
           this.save.keepsakes[p.kind] = true;
           if (p.kind === 'ribbon') this.save.hasRibbon = true;
@@ -397,6 +402,40 @@ class Game {
       const next = this.run.roomIndex + 1;
       this.room.doorsOpen = false;
       this.startFade(() => this.enterRoom(next));
+    }
+  }
+
+  // ---------- Candle Cradle (permanent upgrades, bought with Thread) ----------
+  openCradle() {
+    this.cradleSel = 0;
+    this.state = 'cradle';
+  }
+
+  cradleOptions() {
+    // upgrades still to buy, then a "back to bed" exit row
+    return [...CRADLE_UPGRADES.filter(u => !this.save.cradle[u.id]),
+      { id: '_close', name: 'LEAVE THE CANDLE BE', desc: '', cost: 0 }];
+  }
+
+  updateCradle(dt) {
+    const opts = this.cradleOptions();
+    if (Input.wasPressed('KeyW','ArrowUp')) { this.cradleSel = (this.cradleSel + opts.length - 1) % opts.length; Sfx.talk(); }
+    if (Input.wasPressed('KeyS','ArrowDown')) { this.cradleSel = (this.cradleSel + 1) % opts.length; Sfx.talk(); }
+    this.cradleSel = Math.min(this.cradleSel, opts.length - 1);
+    if (Input.dodge()) { this.state = 'dorm'; return; }
+    if (Input.confirm()) {
+      const pick = opts[this.cradleSel];
+      if (pick.id === '_close') { this.state = 'dorm'; return; }
+      if (this.save.thread >= pick.cost) {
+        this.save.thread -= pick.cost;
+        this.save.cradle[pick.id] = true;
+        this.persist();
+        this.refreshMods();
+        if (pick.id === 'extraStitch') this.player.heal(1); // the new stitch arrives mended
+        Sfx.upgrade();
+      } else {
+        Sfx.doorLock(); // not enough thread
+      }
     }
   }
 
@@ -574,7 +613,7 @@ class Game {
     }
 
     // pickups
-    const KSPR = { flame: SPR.flamePickup, stitch: SPR.stitchPickup, ribbon: SPR.ribbon, chalk: SPR.chalk, spoon: SPR.spoon, musicbox: SPR.musicbox, locket: SPR.locket };
+    const KSPR = { flame: SPR.flamePickup, stitch: SPR.stitchPickup, thread: SPR.thread, ribbon: SPR.ribbon, chalk: SPR.chalk, spoon: SPR.spoon, musicbox: SPR.musicbox, locket: SPR.locket };
     for (const p of this.pickups) {
       const spr = KSPR[p.kind] || SPR.ribbon;
       const bob = Math.sin(performance.now() / 250 + p.x) * 1.5;
@@ -623,6 +662,7 @@ class Game {
     this.drawHud();
 
     if (this.state === 'pretendChoice') this.drawPretendChoice();
+    if (this.state === 'cradle') this.drawCradle();
     if (this.state === 'memoryScene') this.drawMemoryScene();
     if (this.state === 'death') this.drawDeath();
     this.dialogue.draw(ctx, W, H);
@@ -733,6 +773,10 @@ class Game {
     for (const k of KEEPSAKE_ORDER) {
       if (this.save.keepsakes[k]) { ctx.drawImage(kspr[k], kx, 22); kx += 10; }
     }
+    // thread (persistent currency for the Candle Cradle)
+    ctx.drawImage(SPR.thread, kx + 4, 22);
+    ctx.fillStyle = '#b8b0a8';
+    ctx.fillText(`${this.save.thread}`, kx + 12, 28);
     // room / place label
     ctx.fillStyle = '#b8b0a8';
     if (this.room.type !== 'dorm') {
@@ -786,6 +830,49 @@ class Game {
     ctx.font = '7px monospace';
     ctx.fillText('WASD move · J/SPACE attack · K/SHIFT dodge · E talk · L candle burst', W / 2, 250);
     ctx.fillText('3:33 AM. The house is awake.', W / 2, 262);
+    ctx.textAlign = 'left';
+  }
+
+  drawCradle() {
+    ctx.fillStyle = 'rgba(10,8,16,0.85)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffe08a';
+    ctx.font = '10px monospace';
+    ctx.fillText('THE CANDLE CRADLE', W / 2, 52);
+    ctx.font = '7px monospace';
+    ctx.fillStyle = '#b8b0a8';
+    ctx.fillText('The candle keeps what Mallow saves. Thread buys small mercies.', W / 2, 66);
+    ctx.drawImage(SPR.thread, W / 2 - 26, 74);
+    ctx.fillStyle = '#e8e0d8';
+    ctx.fillText(`THREAD: ${this.save.thread}`, W / 2 + 6, 80);
+    const opts = this.cradleOptions();
+    for (let i = 0; i < opts.length; i++) {
+      const y = 100 + i * 28;
+      const sel = this.cradleSel === i;
+      ctx.fillStyle = sel ? '#322d44' : '#1c1626';
+      ctx.fillRect(W / 2 - 150, y, 300, 24);
+      ctx.strokeStyle = sel ? '#ffe08a' : '#55506a';
+      ctx.strokeRect(W / 2 - 149.5, y + 0.5, 299, 23);
+      const o = opts[i];
+      const afford = o.id === '_close' || this.save.thread >= o.cost;
+      ctx.fillStyle = sel ? (afford ? '#e8e0d8' : '#b03a48') : '#b8b0a8';
+      ctx.font = '8px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(o.name, W / 2 - 140, y + 10);
+      if (o.id !== '_close') {
+        ctx.textAlign = 'right';
+        ctx.fillText(`${o.cost} thread`, W / 2 + 140, y + 10);
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#7a6a92';
+        ctx.font = '7px monospace';
+        ctx.fillText(o.desc, W / 2 - 140, y + 20);
+      }
+      ctx.textAlign = 'center';
+    }
+    ctx.fillStyle = '#55506a';
+    ctx.font = '7px monospace';
+    ctx.fillText('[W]/[S] choose · [ENTER] spend · [K] step away', W / 2, 100 + opts.length * 28 + 14);
     ctx.textAlign = 'left';
   }
 

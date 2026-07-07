@@ -222,6 +222,13 @@ SPR.stitchPickup = makeSprite([
   '.WTW.',
   'W...W',
 ]);
+SPR.thread = makeSprite([
+  '.ttt.',
+  'tWTWt',
+  'tTTTt',
+  'tWTWt',
+  '.ttt.',
+]);
 SPR.ribbon = makeSprite([
   'rR...Rr',
   '.RRrRR.',

@@ -39,6 +39,33 @@ export const KEEPSAKE_EFFECTS = {
   locket:   { reviveOncePerNight: true },
 };
 
+// Candle Cradle permanent upgrades, bought with Thread in the Dormitory.
+// Deliberately small effects: the cradle prepares the game for permanent
+// progression without unbalancing the demo. New upgrades are new entries.
+export const CRADLE_UPGRADES = [
+  {
+    id: 'extraStitch',
+    name: 'EXTRA STITCH',
+    desc: 'One careful stitch more. Sewn slowly, tongue out, very serious.',
+    cost: 6,
+    effects: { bonusMaxStitches: 1 },
+  },
+  {
+    id: 'strongerFlame',
+    name: 'STRONGER FLAME',
+    desc: 'Wax saved from the good candles. The flame remembers being taller.',
+    cost: 5,
+    effects: { flameGainMult: 1.25 },
+  },
+  {
+    id: 'needlePractice',
+    name: 'NEEDLE PRACTICE',
+    desc: 'Practise on a pillow that never tells. The needle listens now.',
+    cost: 5,
+    effects: { attackCdMult: 0.85 },
+  },
+];
+
 function fold(mods, eff) {
   if (!eff) return;
   if (eff.damageMult) mods.damageMult *= eff.damageMult;
@@ -53,13 +80,16 @@ function fold(mods, eff) {
   if (eff.reviveOncePerNight) mods.reviveOncePerNight = true;
 }
 
-// Combine owned keepsakes + active pretends (an array of ids) into one mods
-// object. Future sources of modifiers (bond perks, curses, rule rooms) fold
-// in here the same way.
-export function computeMods(keepsakes = {}, pretendIds = []) {
+// Combine owned keepsakes + Candle Cradle upgrades + active pretends (an
+// array of ids) into one mods object. Future sources of modifiers (bond
+// perks, curses, rule rooms) fold in here the same way.
+export function computeMods(keepsakes = {}, pretendIds = [], cradle = {}) {
   const mods = Object.assign({}, DEFAULT_MODS);
   for (const k of Object.keys(KEEPSAKE_EFFECTS)) {
     if (keepsakes[k]) fold(mods, KEEPSAKE_EFFECTS[k]);
+  }
+  for (const u of CRADLE_UPGRADES) {
+    if (cradle[u.id]) fold(mods, u.effects);
   }
   for (const id of pretendIds) fold(mods, PRETEND_EFFECTS[id]);
   return mods;

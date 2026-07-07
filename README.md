@@ -39,6 +39,8 @@ Each night is one floor of the House of Good Children. Beat a night's boss, carr
 
 Every run: wake in the **Dormitory** beside Elsie → four combat rooms → a **memory room** → the boss. Along the way you pick a **Pretend** — a power the children believe you have (six exist; each night offers different ones).
 
+Rooms also drop **Thread** — a persistent currency. Back in the Dormitory, tend the **Candle Cradle** to sew small permanent mercies: an extra stitch, a stronger flame, a quicker needle.
+
 **The crying dolls** appear on every floor. Elsie asked you not to hurt them. What you choose — every night — decides what kind of morning finally comes.
 
 Death is part of the story. The house always lets you back.

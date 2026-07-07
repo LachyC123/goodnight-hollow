@@ -5,10 +5,30 @@
 //
 // Each object: { id, tx, ty, spr (SPR key) or draw(ctx,x,y), prompt,
 //   visible(state), lines, once } — `state` is the permanent story state.
+// An object may instead define action(game): the game calls it on interact
+// (used by the Candle Cradle to open the upgrade menu).
 
 import { TS } from './world.js';
 
 export const HUB_OBJECTS = [
+  {
+    id: 'candleCradle',
+    tx: 2, ty: 5.2,
+    prompt: 'tend',
+    visible: () => true,
+    action(game) { game.openCradle(); },
+    draw(ctx, x, y) {
+      // a little wooden cradle holding a fat candle
+      ctx.fillStyle = '#5e4630';
+      ctx.fillRect(x - 1, y + 6, 10, 3);
+      ctx.fillRect(x, y + 4, 8, 2);
+      ctx.fillStyle = '#e8e0d8';
+      ctx.fillRect(x + 2, y, 4, 5);
+      const flick = 0.7 + 0.3 * Math.sin(performance.now() / 120);
+      ctx.fillStyle = `rgba(255,179,71,${flick})`;
+      ctx.fillRect(x + 3, y - 3, 2, 3);
+    },
+  },
   {
     id: 'mallowBed',
     tx: 21, ty: 1.6,
