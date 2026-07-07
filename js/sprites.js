@@ -333,4 +333,309 @@ SPR.doorLocked = makeSprite([
   'tttttttttttt',
 ]);
 
+// ============ Nights 2-5 ============
+
+// --- Chalk Wraith (Lesson Hall): a child's chalk drawing peeled off the wall ---
+SPR.chalkWraith = makeSprite([
+  '..DDDD..',
+  '.D....D.',
+  '.D.KK.D.',
+  '.D....D.',
+  '..DDDD..',
+  '...DD...',
+  '..DDDD..',
+  '.D.DD.D.',
+  '...DD...',
+  '..D..D..',
+]);
+SPR.chalkWraithPink = makeSprite([
+  '..dddd..',
+  '.d....d.',
+  '.d.KK.d.',
+  '.d....d.',
+  '..dddd..',
+  '...dd...',
+  '..dddd..',
+  '.d.dd.d.',
+  '...dd...',
+  '..d..d..',
+]);
+
+// --- Desk Mimic (Lesson Hall): a school desk with teeth ---
+SPR.mimicClosed = makeSprite([
+  'tttttttttttt',
+  'tTTTTTTTTTTt',
+  'tTTTTTTTTTTt',
+  'tttttttttttt',
+  '.tt......tt.',
+  '.tt......tt.',
+]);
+SPR.mimicOpen = makeSprite([
+  'tttttttttttt',
+  'tKWKWKWKWKKt',
+  'tKKKKKKKKKKt',
+  'tKWKWKWKWKKt',
+  'tttttttttttt',
+  '.tt......tt.',
+]);
+
+// --- Spoon Swarm (Kitchen): cutlery that flies ---
+SPR.spoonEnemy = makeSprite([
+  '.MM.....',
+  'MMMM....',
+  'MMMMM...',
+  '.MM.MMMM',
+  '........',
+]);
+
+// --- Porridge Blob (Kitchen) ---
+SPR.porridge = makeSprite([
+  '...wwww...',
+  '..wwwwww..',
+  '.wwKwwKww.',
+  'wwwwwwwwww',
+  'wwwGwwGwww',
+  '.wGwwwwGw.',
+]);
+
+// --- Sheet Ghost (Laundry): a wet bedsheet that hunts ---
+SPR.sheet = makeSprite([
+  '...WWWW...',
+  '..WWWWWW..',
+  '.WWKWWKWW.',
+  '.WWWWWWWW.',
+  '.WWWWWWWW.',
+  'WWWWWWWWWW',
+  'W.WW.WW.WW',
+]);
+
+// --- Mangle Hound (Laundry): a dog folded out of wrung clothes ---
+SPR.hound = makeSprite([
+  'LL........',
+  'LLL....LLL',
+  '.LLLLLLLL.',
+  '.LKLLLLLL.',
+  '.LLLLLLLLL',
+  '..LL...LL.',
+  '..ll...ll.',
+]);
+
+// --- The Teacher of Quiet (boss, Night 2) ---
+SPR.teacher = makeSprite([
+  '.....gGGg.....',
+  '....GGGGGG....',
+  '....GGGGGG....',
+  '....GGGGGG....',
+  '.....GGGG.....',
+  '...NNNNNNNN...',
+  '..NNNNNNNNNN..',
+  '.NNNNNNNNNNNN.',
+  '.NNWNNNNNNWNN.',
+  '.NNWNNNNNNWNN.',
+  'NNNNNNNNNNNNNN',
+  'NNNNNNNNNNNNNN',
+  'NNNNNNNNNNNNNN',
+  'NNNNNNNNNNNNNN',
+  'NNNNNNNNNNNNNN',
+  'NNNNNNNNNNNNNN',
+  '.NNNN....NNNN.',
+  '.NNNN....NNNN.',
+]);
+// The Teacher's ruler (projectile / pointer)
+SPR.ruler = makeSprite([
+  'TTTTTTTTTT',
+  'TwTwTwTwTT',
+  'TTTTTTTTTT',
+]);
+
+// --- The Cook Who Stirs (boss, Night 3) ---
+SPR.cook = makeSprite([
+  '....WWWWWW....',
+  '....WWWWWW....',
+  '.....WWWW.....',
+  '....gGGGGg....',
+  '....GGGGGG....',
+  '....GGGGGG....',
+  '.....GGGG.....',
+  '...WWWWWWWW...',
+  '..WWWWWWWWWW..',
+  '.WWWWWWWWWWWW.',
+  '.WWrWWWWWWrWW.',
+  'WWWWWWWWWWWWWW',
+  'WWWWWWWWWWWWWW',
+  'WWWWWWWWWWWWWW',
+  'wWWWWWWWWWWWWw',
+  'wWWWWWWWWWWWWw',
+  '.wWWW....WWWw.',
+  '.wWWW....WWWw.',
+]);
+SPR.pot = makeSprite([
+  '..MMMMMMMM..',
+  '.MMMMMMMMMM.',
+  'MMwwwwwwwwMM',
+  'MMMMMMMMMMMM',
+  '.MMMMMMMMMM.',
+  '..MM....MM..',
+]);
+SPR.glob = makeSprite([
+  '.ww.',
+  'wwww',
+  'wwGw',
+  '.ww.',
+]);
+
+// --- The Laundress (boss, Night 4) ---
+SPR.laundress = makeSprite([
+  '.....BBBB.....',
+  '....BBBBBB....',
+  '....BBBBBB....',
+  '.....BBBB.....',
+  '....gGGGGg....',
+  '....GGGGGG....',
+  '.....GGGG.....',
+  '...BBBBBBBB...',
+  '..BBBBBBBBBB..',
+  '.BBBBBBBBBBBB.',
+  '.BBWBBBBBBWBB.',
+  'BBBBBBBBBBBBBB',
+  'BBBBBBBBBBBBBB',
+  'bBBBBBBBBBBBBb',
+  'bBBBBBBBBBBBBb',
+  'bBBBBBBBBBBBBb',
+  '.bBBB....BBBb.',
+  '.bBBB....BBBb.',
+]);
+SPR.suds = makeSprite([
+  '.WW.',
+  'WwwW',
+  'WwwW',
+  '.WW.',
+]);
+
+// --- Mother Mercy (final boss, Night 5) ---
+SPR.mercy = makeSprite([
+  '......rRRr......',
+  '.....RRRRRR.....',
+  '.....RRRRRR.....',
+  '.....RSSSSR.....',
+  '.....RSKKSR.....',
+  '.....RSSSSR.....',
+  '......SSSS......',
+  '....RRRRRRRR....',
+  '...RRRRRRRRRR...',
+  '..RRRRRRRRRRRR..',
+  '..RRWRRRRRRWRR..',
+  '..RRWRRRRRRWRR..',
+  '.RRRRRRRRRRRRRR.',
+  '.RRRRRRRRRRRRRR.',
+  '.RRRRRRRRRRRRRR.',
+  'rRRRRRRRRRRRRRRr',
+  'rRRRRRRRRRRRRRRr',
+  'rRRRRRRRRRRRRRRr',
+  'rRRRRRRRRRRRRRRr',
+  'rRRRRRRRRRRRRRRr',
+  'rRRRRRRRRRRRRRRr',
+  '.rRRRRRRRRRRRRr.',
+]);
+SPR.ruleShard = makeSprite([
+  '.Y.',
+  'YKY',
+  'YKY',
+  '.Y.',
+]);
+
+// --- Keepsake pickups ---
+SPR.chalk = makeSprite([
+  '.DD..',
+  '.DDD.',
+  '..DDD',
+  '...DD',
+]);
+SPR.spoon = makeSprite([
+  '.MM....',
+  'MMMM...',
+  'MMMM...',
+  '.MM.MM.',
+  '.....MM',
+]);
+SPR.musicbox = makeSprite([
+  '..Y....',
+  'ttYtttt',
+  'tTTTTTt',
+  'tTTYTTt',
+  'ttttttt',
+]);
+SPR.locket = makeSprite([
+  '..YY..',
+  '.Y..Y.',
+  '.YYYY.',
+  'YYRRYY',
+  'YYRRYY',
+  '.YYYY.',
+]);
+
+// --- Floor furniture: Lesson Hall ---
+SPR.desk = makeSprite([
+  'tttttttttttt',
+  'tTTTTTTTTTTt',
+  'tTTTwTTTTTTt',
+  'tttttttttttt',
+  '.tt......tt.',
+  '.tt......tt.',
+]);
+SPR.blackboard = makeSprite([
+  'tttttttttttttttt',
+  'tggggggggggggggt',
+  'tgDwDwgwDgwDwggt',
+  'tgwgDggwgDgggwgt',
+  'tttttttttttttttt',
+]);
+// --- Floor furniture: Kitchen ---
+SPR.table = makeSprite([
+  'tttttttttttttttt',
+  'tTTTTTTTTTTTTTTt',
+  'tTwwTTwwTTwwTTTt',
+  'tttttttttttttttt',
+  '.tt..........tt.',
+]);
+SPR.stove = makeSprite([
+  'gggggggggg',
+  'gGGGGGGGGg',
+  'gGooGGooGg',
+  'gGGGGGGGGg',
+  'gggggggggg',
+]);
+// --- Floor furniture: Laundry ---
+SPR.tub = makeSprite([
+  '.MMMMMMMMMM.',
+  'MMBBBBBBBBMM',
+  'MMBWBBBWBBMM',
+  '.MMMMMMMMMM.',
+  '..MM....MM..',
+]);
+SPR.line = makeSprite([
+  'M..............M',
+  'MMMMMMMMMMMMMMMM',
+  'M.WW..LL..WW...M',
+  'M.WW..LL..WW...M',
+  'M.W...L...W....M',
+]);
+// --- Floor furniture: Attic ---
+SPR.box = makeSprite([
+  'tttttttt',
+  'tTTTTTTt',
+  'tTTwTTTt',
+  'tTTTTTTt',
+  'tttttttt',
+]);
+SPR.mirror = makeSprite([
+  '.tttttt.',
+  'ttBBBBtt',
+  'ttBbWBtt',
+  'ttBBbBtt',
+  'ttBBBBtt',
+  '.tttttt.',
+  '...tt...',
+]);
+
 export { makeSprite, PAL };
