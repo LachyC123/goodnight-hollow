@@ -49,8 +49,9 @@ function migrate(s) {
   if (typeof s.comfort !== 'number') s.comfort = 0;
   if (typeof s.truth !== 'number') s.truth = 0;
   // v3: story system container (js/story.js). Map legacy demo progress into it
-  // so existing saves keep their story position.
-  if (!s.story) {
+  // so existing saves keep their story position. (defaultSave() pre-fills
+  // `story`, so detect pre-v3 saves by their stored version number.)
+  if (s.version < 3) {
     const st = defaultStoryState();
     st.hasMetElsie = !!s.metElsie;
     st.hasReceivedElsieRequest = !!s.metElsie; // the old intro included the request
@@ -86,7 +87,12 @@ export function loadSave() {
   let raw = {};
   try { raw = JSON.parse(localStorage.getItem(SAVE_KEY)) || {}; }
   catch (e) { raw = {}; }
-  return migrate(Object.assign(defaultSave(), raw));
+  const s = Object.assign(defaultSave(), raw);
+  // keep the *stored* version so migrate() sees the real format
+  // (a missing version but existing data means a v0/v1 demo save)
+  s.version = typeof raw.version === 'number' ? raw.version
+    : (Object.keys(raw).length ? 0 : SAVE_VERSION);
+  return migrate(s);
 }
 
 export function writeSave(s) {
