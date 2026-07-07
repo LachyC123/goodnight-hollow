@@ -158,6 +158,78 @@ SPR.elsie = makeSprite([
   '..ww..ww..',
 ]);
 
+// --- Oren: the angry child — dark red hair, crossed arms, scowl ---
+SPR.oren = makeSprite([
+  '..rrrrrr..',
+  '.rrRrrRrr.',
+  '.rSSSSSSr.',
+  '.rSKSSKSr.',
+  '.rSSSSSSr.',
+  '.rSSrrSSr.',
+  '..SSSSSS..',
+  '..TTTTTT..',
+  '.TSTTTTST.',
+  '.TSSTTSST.',
+  '.TTTTTTTT.',
+  '.TTTTTTTT.',
+  '..tt..tt..',
+  '..KK..KK..',
+]);
+
+// --- Miri: the sick child — pale, blanket over her shoulders, fever flush ---
+SPR.miri = makeSprite([
+  '..gggggg..',
+  '.gGGGGGGg.',
+  '.gSSSSSSg.',
+  '.gSKSSKSg.',
+  '.gSqSSqSg.',
+  '.gSSSSSSg.',
+  '..SSSSSS..',
+  '.LLLLLLLL.',
+  'LLLLLLLLLL',
+  'LLlLLLLlLL',
+  '.LLLLLLLL.',
+  '.LLLLLLLL.',
+  '..SS..SS..',
+  '..ll..ll..',
+]);
+
+// --- Pip: the laughing child — cracked mask pushed up on his head, wide grin ---
+SPR.pip = makeSprite([
+  '..WWWWWW..',
+  '.WWKWWKWW.',
+  '.tSSSSSSt.',
+  '.tSKSSKSt.',
+  '.tSSSSSSt.',
+  '.tSKKKKSt.',
+  '..SSSSSS..',
+  '..CCCCCC..',
+  '.CCYCCYCC.',
+  '.CCCCCCCC.',
+  '.CCCCCCCC.',
+  '.cCCCCCCc.',
+  '..SS..SS..',
+  '..tt..tt..',
+]);
+
+// --- Jude: the silent child — hood, shadowed face, chalkboard held to his chest ---
+SPR.jude = makeSprite([
+  '..NNNNNN..',
+  '.NNNNNNNN.',
+  '.NggggggN.',
+  '.NgKggKgN.',
+  '.NggggggN.',
+  '.NNggggNN.',
+  '..NNNNNN..',
+  '.NNNNNNNN.',
+  '.NKKKKKKN.',
+  '.NKWwWwKN.',
+  '.NKKKKKKN.',
+  '.NNNNNNNN.',
+  '..gg..gg..',
+  '..KK..KK..',
+]);
+
 // --- Nanny With No Face ---
 SPR.nanny = makeSprite([
   '......gggggg......',

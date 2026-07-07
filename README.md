@@ -43,6 +43,8 @@ Rooms also drop **Thread** — a persistent currency. Back in the Dormitory, ten
 
 **The crying dolls** appear on every floor. Elsie asked you not to hurt them. What you choose — every night — decides what kind of morning finally comes.
 
+Each Keepsake carried home stirs another bed: **Oren** (the angry child), **Miri** (the sick child), **Pip** (the laughing child) and **Jude** (the silent child) wake one by one as the nights are cleared. Talk to them — they remember different pieces of the house, and they react to what Mallow does in the dark.
+
 Death is part of the story. The house always lets you back.
 
 ## Project structure
@@ -60,6 +62,10 @@ js/enemies.js     enemies + bosses for all five floors
 js/rooms.js       room building, per-floor layouts + pre-rendered backgrounds
 js/world.js       constants + tile collision
 js/sprites.js     code-generated pixel sprites
+js/story.js       permanent story state, per-run state, run summaries
+js/storyDialogue.js prioritised, conditional story dialogue
+js/hub.js         Dormitory interactable objects
+js/children.js    the other children: wake conditions, dialogue
 js/dialogue.js    typewriter dialogue queue
 js/input.js       keyboard input
 js/audio.js       WebAudio-generated sound effects

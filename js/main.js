@@ -15,6 +15,7 @@ import { attachDebug } from './debug.js';
 import { StoryManager } from './story.js';
 import { DialogueManager, ELSIE_FIRST_WAKE, nannyIntroLines, NANNY_DEFEAT_LINES } from './storyDialogue.js';
 import { HUB_OBJECTS, hubObjectPos } from './hub.js';
+import { awakeChildren, childPos } from './children.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -26,6 +27,7 @@ class Game {
     this.save = loadSave(); // migration/versioning lives in save.js
     this.story = new StoryManager(this.save, () => this.persist());
     this.storyDialogue = new DialogueManager(this.story);
+    this.childDialogues = {}; // per-child DialogueManagers, built lazily
     this.run = null;        // RunState while a night is being attempted
     this.dialogue = new Dialogue();
     this.particles = [];
@@ -264,6 +266,13 @@ class Game {
       this.talkToElsie();
       return;
     }
+    // the other children, once they've woken (data-driven; see children.js)
+    for (const c of awakeChildren(this.save)) {
+      if (dist(this.player, childPos(c)) < 22 && Input.interact()) {
+        this.talkToChild(c);
+        return;
+      }
+    }
     // hub interactables (data-driven; see hub.js)
     for (const o of HUB_OBJECTS) {
       if (!o.visible(this.story.state)) continue;
@@ -300,6 +309,26 @@ class Game {
     const lines = picked ? [...picked.lines] : [];
     lines.push(...this.elsieNightFlavour());
     this.dialogue.say(lines, () => { if (picked) picked.apply(); });
+  }
+
+  talkToChild(c) {
+    if (this.save.endingSeen) {
+      const morning = {
+        oren: [{ who: 'Oren', text: 'The sun\'s up. I keep waiting to be angry about something. Nothing\'s coming. Weird.' }],
+        miri: [{ who: 'Miri', text: 'Look, little lantern. I don\'t have to draw the morning anymore. It drew itself.' }],
+        pip: [{ who: 'Pip', text: 'Daylight! HA! That\'s the funniest thing I\'ve ever seen. Funny-ha-ha. The GOOD kind.' }],
+        jude: [{ who: '', text: 'Jude writes: MORNING.' }, { who: '', text: 'He does not wipe the board clean.' }],
+      };
+      this.dialogue.say(morning[c.id] || []);
+      return;
+    }
+    if (!this.childDialogues[c.id]) {
+      this.childDialogues[c.id] = new DialogueManager(this.story, c.dialogue);
+    }
+    const picked = this.childDialogues[c.id].pick();
+    if (!picked) return;
+    this.dialogue.say(picked.lines, () => picked.apply());
+    Sfx.talk();
   }
 
   elsieNightFlavour() {
@@ -543,6 +572,14 @@ class Game {
       lines.push({ who: '', text: 'Behind Elsie, fresh paint glistens on the Dormitory wall.' });
       lines.push({ who: '', text: data.rule + '.' });
     }
+    // a keepsake carried home stirs another bed (children.js)
+    const WAKE = {
+      1: 'In the third bed, someone who was not there before rolls over and growls in their sleep.',
+      2: 'In the second bed, a girl is sitting up, already watching Mallow, already smiling.',
+      3: 'From somewhere near the blanket pile, a mask-muffled voice snickers.',
+      4: 'In the far corner, a hooded shape stands very still, holding a small chalkboard.',
+    };
+    if (WAKE[night]) lines.push({ who: '', text: WAKE[night] });
     this.dialogue.say(lines, () => { this.state = 'end'; });
   }
 
@@ -637,11 +674,19 @@ class Game {
     // entities sorted by y
     const ents = [...this.enemies];
     if (!this.player.dead || this.state === 'dying') ents.push(this.player);
-    if (this.state === 'dorm') ents.push({ y: this.elsie.y, drawElsie: true });
+    if (this.state === 'dorm') {
+      ents.push({ y: this.elsie.y, drawElsie: true });
+      for (const c of awakeChildren(this.save)) {
+        const p = childPos(c);
+        ents.push({ y: p.y, drawChild: c, px: p.x, py: p.y });
+      }
+    }
     ents.sort((a, b) => a.y - b.y);
     for (const e of ents) {
       if (e.drawElsie) {
         ctx.drawImage(SPR.elsie, Math.round(ox + this.elsie.x - 5), Math.round(oy + this.elsie.y - 10));
+      } else if (e.drawChild) {
+        ctx.drawImage(SPR[e.drawChild.spr], Math.round(ox + e.px - 5), Math.round(oy + e.py - 10));
       } else e.draw(ctx, ox, oy);
     }
 
@@ -722,6 +767,17 @@ class Game {
     if (!this.dialogue.active && dist(this.player, this.elsie) < 22) {
       ctx.fillStyle = '#ffe08a';
       ctx.fillText('[E] talk', ox + this.elsie.x - 12, oy + this.elsie.y - 16);
+    }
+    // prompts for the other children
+    if (!this.dialogue.active) {
+      for (const c of awakeChildren(this.save)) {
+        const p = childPos(c);
+        if (dist(this.player, p) < 22) {
+          ctx.fillStyle = '#ffe08a';
+          ctx.fillText('[E] talk', ox + p.x - 12, oy + p.y - 16);
+          break;
+        }
+      }
     }
     if (this.room.doorsOpen && !this.dialogue.active) {
       ctx.fillStyle = 'rgba(255,224,138,0.7)';
