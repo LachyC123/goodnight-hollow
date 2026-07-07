@@ -4,7 +4,9 @@
 // only ever have to add fields here.
 
 const SAVE_KEY = 'goodnightHollowSave';
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
+
+import { defaultStoryState } from './story.js';
 
 // The default shape of a save. New permanent systems extend this object:
 //   bonds        — per-child relationship levels (Elsie, Oren, Miri, Pip, Jude...)
@@ -26,6 +28,7 @@ export function defaultSave() {
     truth: 0,
     houseMemory: {},         // house learning system (future system)
     flags: {},               // misc one-off story flags
+    story: defaultStoryState(), // the story system (js/story.js) owns this
     // legacy First Night Demo fields, kept so old saves keep working
     hasRibbon: false, sawMemory: false, wonOnce: false,
   };
@@ -45,6 +48,36 @@ function migrate(s) {
   if (!s.flags) s.flags = {};
   if (typeof s.comfort !== 'number') s.comfort = 0;
   if (typeof s.truth !== 'number') s.truth = 0;
+  // v3: story system container (js/story.js). Map legacy demo progress into it
+  // so existing saves keep their story position.
+  if (!s.story) {
+    const st = defaultStoryState();
+    st.hasMetElsie = !!s.metElsie;
+    st.hasReceivedElsieRequest = !!s.metElsie; // the old intro included the request
+    st.totalRunsStarted = s.nights || 0;
+    st.totalCryingDollsKilled = s.dollKillsTotal || 0;
+    st.comfortScore = s.comfort || 0;
+    st.truthScore = s.truth || 0;
+    st.children.elsie.bond = (s.bonds && s.bonds.elsie) || 0;
+    if (s.nightsCleared >= 1) {
+      st.totalVictories = 1;
+      st.nurseryBossDefeated = true;
+      st.hasSeenGoodChildrenDoNotRemember = true; // the rule was already on the wall
+      st.seenDialogue.elsie_wall_rule_reveal = true;
+      st.seenDialogue.elsie_nanny_defeated = true;
+    }
+    if (s.memoriesSeen && s.memoriesSeen[1]) {
+      st.burnedRibbonFound = true;
+      st.firstMemoryFound = true;
+      st.inventory.burnedRibbon = true;
+      st.seenDialogue.elsie_burned_ribbon_reaction = true;
+    }
+    s.story = st;
+  } else {
+    // fill any story fields added since the save was written
+    s.story = Object.assign(defaultStoryState(), s.story);
+    s.story.children = Object.assign(defaultStoryState().children, s.story.children);
+  }
   s.version = SAVE_VERSION;
   return s;
 }
