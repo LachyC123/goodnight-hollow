@@ -439,7 +439,7 @@ class Game {
   }
 
   updateDeath(dt) {
-    if (Input.confirm()) {
+    if (Input.confirm() && this.fadeDir === 0) {
       this.save.nights++;
       this.story.endRun('death'); // RunSummary — Elsie reacts when spoken to
       this.persist();
