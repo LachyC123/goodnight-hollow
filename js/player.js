@@ -20,10 +20,14 @@ export class Player {
     this.iframes = 0;
     this.dead = false;
     this.pretendBrave = false;   // +dmg below half health
-    this.pretendDark = false;    // dark is scared: enemies near take chip damage
-    this.darkTick = 0;
+    this.pretendQuick = false;   // faster feet + dodge
+    this.pretendEmber = false;   // +flame gain
+    this.pretendFierce = false;  // faster needle
+    this.vxLast = 0; this.vyLast = 0; // for "hold still" boss gazes
     this.hitThisSwing = new Set();
   }
+
+  get keepsakes() { return this.game.save.keepsakes || {}; }
 
   get attacking() { return this.attackT > 0; }
 
@@ -54,13 +58,26 @@ export class Player {
     this.kbx = (dx / l) * 160; this.kby = (dy / l) * 160;
     this.kbT = 0.15;
     if (this.stitches <= 0) {
+      // the mother's locket refuses, once each night
+      if (this.keepsakes.locket && !this.locketUsed) {
+        this.locketUsed = true;
+        this.stitches = 1;
+        this.iframes = 2.0;
+        Sfx.bell();
+        return;
+      }
       this.stitches = 0;
       this.dead = true;
       this.game.onPlayerDeath();
     }
   }
 
-  gainFlame(n) { this.flame = Math.min(100, this.flame + n); }
+  gainFlame(n) {
+    let m = 1;
+    if (this.pretendEmber) m *= 1.5;
+    if (this.keepsakes.chalk) m *= 1.5;
+    this.flame = Math.min(100, this.flame + n * m);
+  }
   heal(n) { this.stitches = Math.min(this.maxStitches, this.stitches + n); }
 
   update(dt, room) {
@@ -80,9 +97,11 @@ export class Player {
     }
 
     let speed = 85;
+    if (this.pretendQuick) speed *= 1.2;
     if (this.slowed) speed *= 0.5;
     this.slowed = false;
 
+    const px0 = this.x, py0 = this.y;
     if (this.kbT > 0) {
       this.kbT -= dt;
       moveEntity(this, this.kbx * dt, this.kby * dt, room);
@@ -98,13 +117,16 @@ export class Player {
         const l = Math.hypot(mx, my);
         const dx = l ? mx / l : this.facing.x, dy = l ? my / l : this.facing.y;
         this.dodgeT = 0.18;
-        this.dodgeCd = 0.6;
+        let cd = 0.6;
+        if (this.pretendQuick) cd *= 0.7;
+        if (this.keepsakes.musicbox) cd *= 0.5;
+        this.dodgeCd = cd;
         this.dvx = dx * 250; this.dvy = dy * 250;
         Sfx.dodge();
       }
       if (Input.attack() && this.attackCd <= 0) {
         this.attackT = 0.12;
-        this.attackCd = 0.32;
+        this.attackCd = this.pretendFierce ? 0.2 : 0.32;
         this.hitThisSwing = new Set();
         Sfx.swing();
       }
@@ -114,6 +136,8 @@ export class Player {
         this.game.flameBurst(this.x, this.y);
       }
     }
+    this.vxLast = (this.x - px0) / Math.max(dt, 0.0001);
+    this.vyLast = (this.y - py0) / Math.max(dt, 0.0001);
   }
 
   draw(ctx, ox, oy) {

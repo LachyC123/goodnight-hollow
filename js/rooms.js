@@ -1,7 +1,12 @@
-// Room construction and rendering for the Dormitory and Nursery Rot.
+// Room construction and rendering for the Dormitory and the five floors.
 import { SPR } from './sprites.js';
 import { TS, COLS, ROWS } from './world.js';
-import { ButtonMouse, BlanketCrawler, CryingDoll, Nanny } from './enemies.js';
+import {
+  ButtonMouse, BlanketCrawler, CryingDoll, Nanny,
+  ChalkWraith, DeskMimic, SpoonSwarm, PorridgeBlob, SheetGhost, MangleHound,
+  Teacher, Cook, Laundress, Mercy,
+} from './enemies.js';
+import { NIGHTS } from './nights.js';
 
 // tiles for the exit door (east wall) and entry (west wall)
 const EXIT_TILES = [{ x: COLS - 1, y: 6 }, { x: COLS - 1, y: 7 }];
@@ -34,16 +39,17 @@ function mulberry(seed) {
   };
 }
 
-export function buildRoom(type, variant = 0, game = null) {
+export function buildRoom(type, variant = 0, night = 1) {
   const room = {
     type,
+    night,
     grid: emptyGrid(),
     decor: [],
     spawnSpecs: [],
     doorTiles: EXIT_TILES,
     doorsOpen: false,
     cleared: false,
-    seed: 100 + variant * 37 + (type === 'boss' ? 999 : 0),
+    seed: 100 + variant * 37 + night * 211 + (type === 'boss' ? 999 : 0),
     bg: null,
   };
 
@@ -58,42 +64,13 @@ export function buildRoom(type, variant = 0, game = null) {
     room.decor.push({ spr: SPR.blanketPile, tx: 22, ty: 11, scale: 2 });
     room.decor.push({ spr: SPR.teddy, tx: 8, ty: 10, scale: 1 });
   } else if (type === 'combat') {
-    const layouts = [
-      r => { // cribs flanking
-        addObstacle(r, 5, 4, 2, 1, SPR.crib);
-        addObstacle(r, 20, 9, 2, 1, SPR.crib);
-        r.spawnSpecs = [
-          ['mouse', C(9, 3)], ['mouse', C(18, 4)], ['mouse', C(14, 11)], ['mouse', C(22, 7)],
-        ];
-      },
-      r => { // toy piles + crawlers
-        addObstacle(r, 13, 6, 2, 1, SPR.toyPile);
-        addObstacle(r, 6, 10, 2, 1, SPR.toyPile);
-        r.spawnSpecs = [
-          ['crawler', C(9, 4)], ['crawler', C(20, 10)], ['mouse', C(22, 3)], ['mouse', C(16, 11)],
-        ];
-      },
-      r => { // crying dolls in cribs
-        addObstacle(r, 8, 3, 2, 1, SPR.crib);
-        addObstacle(r, 18, 10, 2, 1, SPR.crib);
-        r.spawnSpecs = [
-          ['doll', C(9, 6)], ['doll', C(19, 8)], ['mouse', C(14, 3)], ['mouse', C(14, 11)],
-        ];
-      },
-      r => { // gauntlet
-        addObstacle(r, 10, 5, 2, 1, SPR.toyPile);
-        addObstacle(r, 17, 8, 2, 1, SPR.crib);
-        r.spawnSpecs = [
-          ['crawler', C(13, 10)], ['doll', C(23, 4)], ['mouse', C(8, 9)],
-          ['mouse', C(20, 3)], ['mouse', C(24, 10)],
-        ];
-      },
-    ];
-    layouts[variant % layouts.length](room);
-    // ambience decor (non-solid): a candle and scattered comfort objects
+    const layouts = COMBAT_LAYOUTS[night] || COMBAT_LAYOUTS[1];
+    layouts[variant % layouts.length](room, C);
+    // ambience decor (non-solid)
     room.decor.push({ spr: SPR.candle, tx: 2 + (variant * 5) % 20, ty: 2, scale: 1 });
-    room.decor.push({ spr: SPR.blanketPile, tx: 3 + (variant * 7) % 18, ty: 11, scale: 2 });
-    room.decor.push({ spr: SPR.teddy, tx: 5 + (variant * 9) % 20, ty: 4, scale: 1 });
+    const amb = AMBIENCE[night] || AMBIENCE[1];
+    room.decor.push({ spr: amb[variant % amb.length], tx: 3 + (variant * 7) % 18, ty: 11, scale: 2 });
+    room.decor.push({ spr: amb[(variant + 1) % amb.length], tx: 5 + (variant * 9) % 20, ty: 4, scale: 1 });
   } else if (type === 'memory') {
     room.cleared = true;
     room.decor.push({ spr: SPR.candle, tx: 11, ty: 6, scale: 1 });
@@ -106,10 +83,181 @@ export function buildRoom(type, variant = 0, game = null) {
     room.decor.push({ spr: SPR.candle, tx: 24, ty: 2, scale: 1 });
     room.decor.push({ spr: SPR.candle, tx: 3, ty: 11, scale: 1 });
     room.decor.push({ spr: SPR.candle, tx: 24, ty: 11, scale: 1 });
-    room.spawnSpecs = [['nanny', C(20, 7)]];
+    room.spawnSpecs = [[NIGHTS[night].bossKind, C(20, 7)]];
   }
   return room;
 }
+
+// Combat room layouts per night. Each layout adds solid obstacles + spawn specs.
+const COMBAT_LAYOUTS = {
+  1: [
+    (r, C) => { // cribs flanking
+      addObstacle(r, 5, 4, 2, 1, SPR.crib);
+      addObstacle(r, 20, 9, 2, 1, SPR.crib);
+      r.spawnSpecs = [
+        ['mouse', C(9, 3)], ['mouse', C(18, 4)], ['mouse', C(14, 11)], ['mouse', C(22, 7)],
+      ];
+    },
+    (r, C) => { // toy piles + crawlers
+      addObstacle(r, 13, 6, 2, 1, SPR.toyPile);
+      addObstacle(r, 6, 10, 2, 1, SPR.toyPile);
+      r.spawnSpecs = [
+        ['crawler', C(9, 4)], ['crawler', C(20, 10)], ['mouse', C(22, 3)], ['mouse', C(16, 11)],
+      ];
+    },
+    (r, C) => { // crying dolls in cribs
+      addObstacle(r, 8, 3, 2, 1, SPR.crib);
+      addObstacle(r, 18, 10, 2, 1, SPR.crib);
+      r.spawnSpecs = [
+        ['doll', C(9, 6)], ['doll', C(19, 8)], ['mouse', C(14, 3)], ['mouse', C(14, 11)],
+      ];
+    },
+    (r, C) => { // gauntlet
+      addObstacle(r, 10, 5, 2, 1, SPR.toyPile);
+      addObstacle(r, 17, 8, 2, 1, SPR.crib);
+      r.spawnSpecs = [
+        ['crawler', C(13, 10)], ['doll', C(23, 4)], ['mouse', C(8, 9)],
+        ['mouse', C(20, 3)], ['mouse', C(24, 10)],
+      ];
+    },
+  ],
+  2: [
+    (r, C) => { // rows of desks, wraiths above them
+      addObstacle(r, 6, 4, 2, 1, SPR.desk);
+      addObstacle(r, 12, 4, 2, 1, SPR.desk);
+      addObstacle(r, 18, 4, 2, 1, SPR.desk);
+      addObstacle(r, 9, 9, 2, 1, SPR.desk);
+      addObstacle(r, 15, 9, 2, 1, SPR.desk);
+      r.spawnSpecs = [
+        ['wraith', C(8, 2)], ['wraith', C(20, 11)], ['mouse', C(14, 7)], ['mouse', C(23, 3)],
+      ];
+    },
+    (r, C) => { // one of these desks bites
+      addObstacle(r, 7, 6, 2, 1, SPR.desk);
+      addObstacle(r, 20, 5, 2, 1, SPR.desk);
+      r.spawnSpecs = [
+        ['mimic', C(14, 8)], ['mimic', C(22, 10)], ['wraith', C(10, 11)],
+      ];
+    },
+    (r, C) => { // detention: dolls made to sit facing the wall
+      addObstacle(r, 4, 7, 2, 1, SPR.desk);
+      addObstacle(r, 23, 7, 2, 1, SPR.desk);
+      r.spawnSpecs = [
+        ['doll', C(3, 3)], ['doll', C(25, 11)], ['wraith', C(14, 4)], ['wraith', C(14, 10)],
+      ];
+    },
+    (r, C) => { // full class
+      addObstacle(r, 10, 4, 2, 1, SPR.desk);
+      addObstacle(r, 16, 9, 2, 1, SPR.desk);
+      r.spawnSpecs = [
+        ['mimic', C(13, 7)], ['wraith', C(7, 3)], ['wraith', C(21, 11)],
+        ['mouse', C(23, 4)], ['doll', C(5, 10)],
+      ];
+    },
+  ],
+  3: [
+    (r, C) => { // the long table itself
+      addObstacle(r, 8, 6, 4, 1, SPR.table);
+      addObstacle(r, 16, 6, 4, 1, SPR.table);
+      r.spawnSpecs = [
+        ['spoon', C(7, 3)], ['spoon', C(21, 3)], ['spoon', C(14, 11)], ['porridge', C(14, 9)],
+      ];
+    },
+    (r, C) => { // stoves in the corners
+      addObstacle(r, 4, 3, 2, 1, SPR.stove);
+      addObstacle(r, 22, 10, 2, 1, SPR.stove);
+      r.spawnSpecs = [
+        ['porridge', C(8, 8)], ['porridge', C(20, 5)], ['spoon', C(14, 3)], ['crawler', C(14, 11)],
+      ];
+    },
+    (r, C) => { // dolls at the table, still waiting to be excused
+      addObstacle(r, 11, 7, 4, 1, SPR.table);
+      r.spawnSpecs = [
+        ['doll', C(10, 5)], ['doll', C(17, 9)], ['spoon', C(5, 4)], ['spoon', C(23, 10)],
+      ];
+    },
+    (r, C) => { // full kitchen
+      addObstacle(r, 7, 4, 2, 1, SPR.stove);
+      addObstacle(r, 15, 9, 4, 1, SPR.table);
+      r.spawnSpecs = [
+        ['porridge', C(20, 4)], ['spoon', C(10, 10)], ['spoon', C(24, 8)],
+        ['crawler', C(5, 9)], ['doll', C(13, 3)],
+      ];
+    },
+  ],
+  4: [
+    (r, C) => { // tubs in a row
+      addObstacle(r, 6, 5, 2, 1, SPR.tub);
+      addObstacle(r, 13, 5, 2, 1, SPR.tub);
+      addObstacle(r, 20, 5, 2, 1, SPR.tub);
+      r.spawnSpecs = [
+        ['sheet', C(9, 9)], ['sheet', C(18, 10)], ['mouse', C(24, 3)], ['mouse', C(4, 11)],
+      ];
+    },
+    (r, C) => { // hanging lines, hounds between them
+      addObstacle(r, 9, 3, 2, 1, SPR.line);
+      addObstacle(r, 17, 10, 2, 1, SPR.line);
+      r.spawnSpecs = [
+        ['hound', C(6, 8)], ['hound', C(22, 5)], ['sheet', C(14, 7)],
+      ];
+    },
+    (r, C) => { // dolls left in the wash
+      addObstacle(r, 12, 7, 2, 1, SPR.tub);
+      r.spawnSpecs = [
+        ['doll', C(6, 4)], ['doll', C(22, 10)], ['sheet', C(14, 3)], ['hound', C(18, 11)],
+      ];
+    },
+    (r, C) => { // full laundry
+      addObstacle(r, 7, 4, 2, 1, SPR.tub);
+      addObstacle(r, 18, 8, 2, 1, SPR.line);
+      r.spawnSpecs = [
+        ['hound', C(13, 10)], ['sheet', C(8, 9)], ['sheet', C(22, 4)],
+        ['mouse', C(4, 3)], ['doll', C(24, 11)],
+      ];
+    },
+  ],
+  5: [
+    (r, C) => { // boxes of small shoes
+      addObstacle(r, 6, 4, 1, 1, SPR.box);
+      addObstacle(r, 12, 8, 1, 1, SPR.box);
+      addObstacle(r, 19, 4, 1, 1, SPR.box);
+      addObstacle(r, 23, 10, 1, 1, SPR.box);
+      r.spawnSpecs = [
+        ['wraith', C(9, 10)], ['wraith', C(18, 3)], ['sheet', C(14, 7)], ['mouse', C(24, 5)],
+      ];
+    },
+    (r, C) => { // covered mirrors
+      addObstacle(r, 8, 5, 1, 1, SPR.mirror);
+      addObstacle(r, 19, 8, 1, 1, SPR.mirror);
+      r.spawnSpecs = [
+        ['sheet', C(5, 9)], ['sheet', C(23, 4)], ['wraith', C(14, 11)], ['wraith', C(14, 3)],
+      ];
+    },
+    (r, C) => { // the dolls kept closest
+      addObstacle(r, 13, 6, 1, 1, SPR.box);
+      addObstacle(r, 15, 8, 1, 1, SPR.box);
+      r.spawnSpecs = [
+        ['doll', C(9, 4)], ['doll', C(19, 10)], ['doll', C(24, 6)], ['wraith', C(5, 10)],
+      ];
+    },
+    (r, C) => { // everything the house remembers
+      addObstacle(r, 9, 4, 1, 1, SPR.box);
+      addObstacle(r, 18, 9, 1, 1, SPR.mirror);
+      r.spawnSpecs = [
+        ['wraith', C(6, 9)], ['sheet', C(22, 4)], ['hound', C(14, 11)],
+        ['mouse', C(24, 8)], ['doll', C(4, 4)],
+      ];
+    },
+  ],
+};
+
+const AMBIENCE = {
+  1: [SPR.blanketPile, SPR.teddy],
+  2: [SPR.blackboard, SPR.desk],
+  3: [SPR.pot, SPR.stove],
+  4: [SPR.line, SPR.tub],
+  5: [SPR.box, SPR.mirror],
+};
 
 export function spawnEnemies(room, game) {
   const out = [];
@@ -117,7 +265,17 @@ export function spawnEnemies(room, game) {
     if (kind === 'mouse') out.push(new ButtonMouse(game, p.x, p.y));
     else if (kind === 'crawler') out.push(new BlanketCrawler(game, p.x, p.y));
     else if (kind === 'doll') out.push(new CryingDoll(game, p.x, p.y));
+    else if (kind === 'wraith') out.push(new ChalkWraith(game, p.x, p.y));
+    else if (kind === 'mimic') out.push(new DeskMimic(game, p.x, p.y));
+    else if (kind === 'spoon') out.push(new SpoonSwarm(game, p.x, p.y));
+    else if (kind === 'porridge') out.push(new PorridgeBlob(game, p.x, p.y));
+    else if (kind === 'sheet') out.push(new SheetGhost(game, p.x, p.y));
+    else if (kind === 'hound') out.push(new MangleHound(game, p.x, p.y));
     else if (kind === 'nanny') out.push(new Nanny(game, p.x, p.y));
+    else if (kind === 'teacher') out.push(new Teacher(game, p.x, p.y));
+    else if (kind === 'cook') out.push(new Cook(game, p.x, p.y));
+    else if (kind === 'laundress') out.push(new Laundress(game, p.x, p.y));
+    else if (kind === 'mercy') out.push(new Mercy(game, p.x, p.y));
   }
   return out;
 }
@@ -129,8 +287,9 @@ export function renderRoomBg(room) {
   const ctx = c.getContext('2d');
   const rnd = mulberry(room.seed);
   const dorm = room.type === 'dorm';
-  // warm wooden floorboards (reference image style)
-  const planks = ['#43301f', '#4a3524', '#3c2b1c', '#463222'];
+  const pal = (NIGHTS[room.night] || NIGHTS[1]).palette;
+  // floorboards, tinted per floor
+  const planks = dorm ? NIGHTS[1].palette.planks : pal.planks;
   for (let y = 1; y < ROWS - 1; y++) {
     const shade = planks[Math.floor(rnd() * planks.length)];
     for (let x = 1; x < COLS - 1; x++) {
@@ -146,8 +305,8 @@ export function renderRoomBg(room) {
       }
     }
   }
-  // dark walls
-  ctx.fillStyle = '#151020';
+  // dark walls, tinted per floor
+  ctx.fillStyle = dorm ? NIGHTS[1].palette.wall : pal.wall;
   ctx.fillRect(0, 0, COLS * TS, TS);
   ctx.fillRect(0, (ROWS - 1) * TS, COLS * TS, TS);
   ctx.fillRect(0, 0, TS, ROWS * TS);

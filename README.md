@@ -1,4 +1,4 @@
-# Goodnight, Hollow — First Night Demo
+# Goodnight, Hollow
 
 A dark pixel-art story roguelite that runs entirely in the browser. You are **Mallow**, a stitched rabbit doll with a candle flame in its chest, protecting the children of a cursed orphanage that wakes at 3:33 AM.
 
@@ -25,26 +25,34 @@ python3 -m http.server 8000
 | Talk / Interact / Advance dialogue | E / Enter |
 | Candleflame burst (50 flame) | L / C |
 
-## The First Night
+## The Five Nights
 
-- Wake in the **Dormitory** beside Elsie. Talk to her. Keep your promise — or don't.
-- Fight through the **Nursery Rot**: Button Mice, Blanket Crawlers, and Crying Dolls (Elsie asked you not to hurt them).
-- Find a **memory room**. Not all memories are kind.
-- Choose a **Pretend** — a power the children believe you have.
-- Face **The Nanny With No Face**.
-- Bring back what she drops. Elsie will have something to say.
+Each night is one floor of the House of Good Children. Beat a night's boss, carry its **Keepsake** home, and the next floor wakes the following night. Keepsakes persist between nights (saved in your browser) and each grants a lasting gift.
 
-Death is part of the story. Your **Keepsakes** persist between nights (saved in your browser).
+| Night | Floor | Boss | Keepsake |
+|---|---|---|---|
+| 1 | Nursery Rot | The Nanny With No Face | the burned ribbon (+1 stitch) |
+| 2 | The Lesson Hall | The Teacher of Quiet | the chalk stub (+50% flame gained) |
+| 3 | The Long Kitchen | The Cook Who Stirs | the silver spoon (stitches heal double) |
+| 4 | The Laundry Below | The Laundress | the music box (dodge recovers twice as fast) |
+| 5 | The Attic of Rules | Mother Mercy | the mother's locket (a small mercy, once per night) |
+
+Every run: wake in the **Dormitory** beside Elsie → four combat rooms → a **memory room** → the boss. Along the way you pick a **Pretend** — a power the children believe you have (six exist; each night offers different ones).
+
+**The crying dolls** appear on every floor. Elsie asked you not to hurt them. What you choose — every night — decides what kind of morning finally comes.
+
+Death is part of the story. The house always lets you back.
 
 ## Project structure
 
 ```
 index.html        entry point
 css/style.css     canvas scaling
-js/main.js        game states, hub, run manager, HUD, story
+js/main.js        game states, hub, run manager, HUD, story, endings
+js/nights.js      the five nights: floors, bosses, keepsakes, memories, rules
 js/player.js      Mallow: movement, dodge, attack, stitches, candleflame
-js/enemies.js     Button Mouse, Blanket Crawler, Crying Doll, Nanny boss
-js/rooms.js       room building + pre-rendered backgrounds
+js/enemies.js     enemies + bosses for all five floors
+js/rooms.js       room building, per-floor layouts + pre-rendered backgrounds
 js/world.js       constants + tile collision
 js/sprites.js     code-generated pixel sprites
 js/dialogue.js    typewriter dialogue queue
