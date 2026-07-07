@@ -10,8 +10,12 @@ import { W, H, TS, COLS, ROWS, OX, OY, overlap, dist, solidAt } from './world.js
 import { NIGHTS, LAST_NIGHT, PRETENDS, KEEPSAKE_ORDER } from './nights.js';
 import { loadSave, writeSave } from './save.js';
 import { RunState } from './run.js';
-import { computeMods, PRETEND_EFFECTS } from './upgrades.js';
+import { computeMods, PRETEND_EFFECTS, CRADLE_UPGRADES } from './upgrades.js';
 import { attachDebug } from './debug.js';
+import { StoryManager } from './story.js';
+import { DialogueManager, ELSIE_FIRST_WAKE, nannyIntroLines, NANNY_DEFEAT_LINES } from './storyDialogue.js';
+import { HUB_OBJECTS, hubObjectPos } from './hub.js';
+import { awakeChildren, childPos } from './children.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -21,6 +25,9 @@ class Game {
   constructor() {
     this.state = 'title';
     this.save = loadSave(); // migration/versioning lives in save.js
+    this.story = new StoryManager(this.save, () => this.persist());
+    this.storyDialogue = new DialogueManager(this.story);
+    this.childDialogues = {}; // per-child DialogueManagers, built lazily
     this.run = null;        // RunState while a night is being attempted
     this.dialogue = new Dialogue();
     this.particles = [];
@@ -37,7 +44,7 @@ class Game {
 
   // combined keepsake + pretend modifiers; recomputed whenever either changes
   refreshMods() {
-    this.mods = computeMods(this.save.keepsakes, this.run ? this.run.pretends : []);
+    this.mods = computeMods(this.save.keepsakes, this.run ? this.run.pretends : [], this.save.cradle);
     if (this.player) {
       this.player.maxStitches = this.player.baseMaxStitches + this.mods.bonusMaxStitches;
       this.player.stitches = Math.min(this.player.stitches, this.player.maxStitches);
@@ -66,6 +73,7 @@ class Game {
 
   startRun() {
     this.run = new RunState(Math.min(this.save.nightsCleared + 1, LAST_NIGHT));
+    this.story.beginRun(this.nightData.floor);
     this.refreshMods();
     this.player.locketUsed = false;
     this.state = 'run';
@@ -83,12 +91,19 @@ class Game {
     if (this.room.type === 'combat' || this.room.type === 'boss') {
       this.room.doorsOpen = false;
       this.enemies = spawnEnemies(this.room, this);
-      this.run.dollsSeen += this.enemies.filter(e => e.isDoll).length;
+      const dolls = this.enemies.filter(e => e.isDoll).length;
+      this.run.dollsSeen += dolls;
+      this.story.onDollSeen(dolls);
       Sfx.doorLock();
       if (this.room.type === 'boss') {
-        this.dialogue.say([
-          { who: this.nightData.boss, text: this.nightData.bossIntro },
-        ]);
+        this.story.onBossReached();
+        if (this.nightData.bossKind === 'nanny') {
+          this.dialogue.say(nannyIntroLines(this.story));
+        } else {
+          this.dialogue.say([
+            { who: this.nightData.boss, text: this.nightData.bossIntro },
+          ]);
+        }
         Sfx.bossRoar();
       }
     } else {
@@ -103,7 +118,7 @@ class Game {
   onDollKilled(doll) {
     this.run.dollKills++;
     this.save.dollKillsTotal++;
-    this.save.truth++; // cruelty is a kind of truth; the moral axis remembers
+    this.story.onDollKilled(); // moral choice tracking + truthScore
     this.persist();
     // the house rewards cruelty
     this.pickups.push({ kind: 'flame', x: doll.x, y: doll.y });
@@ -116,10 +131,12 @@ class Game {
     this.room.cleared = true;
     this.room.doorsOpen = true;
     this.run.roomsCleared++;
+    this.story.onRoomCleared();
     Sfx.doorOpen();
     const cx = 14 * TS, cy = 7 * TS;
     this.pickups.push({ kind: 'flame', x: cx - 8, y: cy });
     this.pickups.push({ kind: 'stitch', x: cx + 8, y: cy });
+    this.pickups.push({ kind: 'thread', x: cx, y: cy - 12 });
     this.player.gainFlame(20);
     if (this.mods.healOnRoomClear) this.player.heal(this.mods.healOnRoomClear);
     if (!this.run.pretendOffered && this.room.type === 'combat') {
@@ -139,10 +156,13 @@ class Game {
     this.enemies = this.enemies.filter(e => !e.dead);
     this.projectiles = [];
     this.room.doorsOpen = false;
+    this.story.onBossDefeated(this.nightData.bossKind);
     this.pickups.push({ kind: this.nightData.keepsake, keepsake: true, x: 14 * TS, y: 7 * TS });
-    this.dialogue.say([
-      { who: '', text: this.nightData.dropText },
-    ]);
+    for (let i = 0; i < 3; i++) this.pickups.push({ kind: 'thread', x: (12 + i * 2) * TS, y: 9 * TS });
+    const lines = [];
+    if (this.nightData.bossKind === 'nanny') lines.push(...NANNY_DEFEAT_LINES);
+    lines.push({ who: '', text: this.nightData.dropText });
+    this.dialogue.say(lines);
   }
 
   onPlayerDeath() {
@@ -198,6 +218,7 @@ class Game {
       case 'dorm': this.updateDorm(dt); break;
       case 'run': this.updateRun(dt); break;
       case 'pretendChoice': this.updatePretendChoice(dt); break;
+      case 'cradle': this.updateCradle(dt); break;
       case 'memoryScene': this.updateMemoryScene(dt); break;
       case 'dying':
         this.deathT -= dt;
@@ -225,16 +246,10 @@ class Game {
   }
 
   introSequence() {
-    this.dialogue.say([
-      { who: '', text: 'The House of Good Children. 3:33 AM.' },
-      { who: 'Elsie', text: 'You came back wrong this time.' },
-      { who: 'Elsie', text: 'Your ear... and your eye. Did the house take them? It takes things, you know. When it likes you.' },
-      { who: '', text: 'Somewhere below, a bell rings once. The Dormitory door unlocks by itself.' },
-      { who: 'Elsie', text: 'It wants you to go downstairs.' },
-      { who: 'Elsie', text: 'Mallow... if you see the crying dolls — please don\'t hurt them. I think they\'re children too. They just forgot how to look like it.' },
-      { who: 'Elsie', text: 'Come back. Promise you\'ll come back.' },
-    ], () => {
+    // Scene 1: First Wake
+    this.dialogue.say(ELSIE_FIRST_WAKE, () => {
       this.save.metElsie = true;
+      this.story.setFlag('hasMetElsie', true);
       this.persist();
       this.room.doorsOpen = true;
       this.bellRung = true;
@@ -248,7 +263,25 @@ class Game {
     this.player.update(dt, this.room);
     // talk to Elsie
     if (dist(this.player, this.elsie) < 22 && Input.interact()) {
-      this.dialogue.say(this.elsieDormLines());
+      this.talkToElsie();
+      return;
+    }
+    // the other children, once they've woken (data-driven; see children.js)
+    for (const c of awakeChildren(this.save)) {
+      if (dist(this.player, childPos(c)) < 22 && Input.interact()) {
+        this.talkToChild(c);
+        return;
+      }
+    }
+    // hub interactables (data-driven; see hub.js)
+    for (const o of HUB_OBJECTS) {
+      if (!o.visible(this.story.state)) continue;
+      if (dist(this.player, hubObjectPos(o)) < 18 && Input.interact()) {
+        if (o.action) { o.action(this); Sfx.talk(); break; }
+        this.dialogue.say(o.lines);
+        Sfx.talk();
+        break;
+      }
     }
     // exit east door -> start run
     if (this.room.doorsOpen && this.player.x > (COLS - 1.6) * TS && this.player.y > 5.4 * TS && this.player.y < 8.6 * TS) {
@@ -257,14 +290,48 @@ class Game {
     }
   }
 
-  elsieDormLines() {
+  talkToElsie() {
     if (this.save.endingSeen) {
-      return [
+      this.dialogue.say([
         { who: 'Elsie', text: 'The sun is coming up. It hasn\'t done that in... I don\'t remember how long.' },
         { who: 'Elsie', text: 'You kept your promise, Mallow. Every night. You came back every night.' },
         { who: 'Elsie', text: 'Let\'s watch the window a while. There\'s nothing downstairs that needs us anymore.' },
-      ];
+      ]);
+      return;
     }
+    // Story-critical dialogue always beats generic hub chatter (see storyDialogue.js).
+    const picked = this.storyDialogue.pick();
+    if (picked && picked.priority > 10) {
+      this.dialogue.say(picked.lines, () => picked.apply());
+      return;
+    }
+    // repeatable pre-run dialogue + the night's flavour lines
+    const lines = picked ? [...picked.lines] : [];
+    lines.push(...this.elsieNightFlavour());
+    this.dialogue.say(lines, () => { if (picked) picked.apply(); });
+  }
+
+  talkToChild(c) {
+    if (this.save.endingSeen) {
+      const morning = {
+        oren: [{ who: 'Oren', text: 'The sun\'s up. I keep waiting to be angry about something. Nothing\'s coming. Weird.' }],
+        miri: [{ who: 'Miri', text: 'Look, little lantern. I don\'t have to draw the morning anymore. It drew itself.' }],
+        pip: [{ who: 'Pip', text: 'Daylight! HA! That\'s the funniest thing I\'ve ever seen. Funny-ha-ha. The GOOD kind.' }],
+        jude: [{ who: '', text: 'Jude writes: MORNING.' }, { who: '', text: 'He does not wipe the board clean.' }],
+      };
+      this.dialogue.say(morning[c.id] || []);
+      return;
+    }
+    if (!this.childDialogues[c.id]) {
+      this.childDialogues[c.id] = new DialogueManager(this.story, c.dialogue);
+    }
+    const picked = this.childDialogues[c.id].pick();
+    if (!picked) return;
+    this.dialogue.say(picked.lines, () => picked.apply());
+    Sfx.talk();
+  }
+
+  elsieNightFlavour() {
     const nc = this.save.nightsCleared;
     // pre-night flavour for the night about to be attempted
     const NEXT = {
@@ -290,15 +357,6 @@ class Game {
       ],
     };
     const lines = [];
-    if (this.save.nights > 0 && nc === 0) {
-      if (this.save.dollKillsTotal > 0) {
-        lines.push({ who: 'Elsie', text: '...The dolls stopped crying last night. I could hear it from here.' });
-        lines.push({ who: 'Elsie', text: 'You promised. Didn\'t you? Maybe I dreamed that part.' });
-      } else {
-        lines.push({ who: 'Elsie', text: 'You didn\'t hurt them. The crying ones. I can always tell.' });
-        lines.push({ who: 'Elsie', text: 'Thank you, Mallow.' });
-      }
-    }
     if (nc >= 1 && !this.save.endingSeen) {
       lines.push({ who: 'Elsie', text: 'The wall keeps changing in the night. I didn\'t see who writes the new rules. I don\'t want to.' });
     }
@@ -357,6 +415,7 @@ class Game {
         Sfx.pickup();
         if (p.kind === 'flame') this.player.gainFlame(25);
         else if (p.kind === 'stitch') this.player.heal(1 * this.mods.healMult);
+        else if (p.kind === 'thread') { this.save.thread++; this.persist(); }
         else if (p.keepsake) {
           this.save.keepsakes[p.kind] = true;
           if (p.kind === 'ribbon') this.save.hasRibbon = true;
@@ -372,6 +431,40 @@ class Game {
       const next = this.run.roomIndex + 1;
       this.room.doorsOpen = false;
       this.startFade(() => this.enterRoom(next));
+    }
+  }
+
+  // ---------- Candle Cradle (permanent upgrades, bought with Thread) ----------
+  openCradle() {
+    this.cradleSel = 0;
+    this.state = 'cradle';
+  }
+
+  cradleOptions() {
+    // upgrades still to buy, then a "back to bed" exit row
+    return [...CRADLE_UPGRADES.filter(u => !this.save.cradle[u.id]),
+      { id: '_close', name: 'LEAVE THE CANDLE BE', desc: '', cost: 0 }];
+  }
+
+  updateCradle(dt) {
+    const opts = this.cradleOptions();
+    if (Input.wasPressed('KeyW','ArrowUp')) { this.cradleSel = (this.cradleSel + opts.length - 1) % opts.length; Sfx.talk(); }
+    if (Input.wasPressed('KeyS','ArrowDown')) { this.cradleSel = (this.cradleSel + 1) % opts.length; Sfx.talk(); }
+    this.cradleSel = Math.min(this.cradleSel, opts.length - 1);
+    if (Input.dodge()) { this.state = 'dorm'; return; }
+    if (Input.confirm()) {
+      const pick = opts[this.cradleSel];
+      if (pick.id === '_close') { this.state = 'dorm'; return; }
+      if (this.save.thread >= pick.cost) {
+        this.save.thread -= pick.cost;
+        this.save.cradle[pick.id] = true;
+        this.persist();
+        this.refreshMods();
+        if (pick.id === 'extraStitch') this.player.heal(1); // the new stitch arrives mended
+        Sfx.upgrade();
+      } else {
+        Sfx.doorLock(); // not enough thread
+      }
     }
   }
 
@@ -403,6 +496,8 @@ class Game {
       if (this.memoryPage >= this.memoryPages().length) {
         this.save.sawMemory = true;
         this.save.memoriesSeen[this.currentNight] = true;
+        // Night 1's memory is the Burned Ribbon (story inventory + flags)
+        this.story.onMemoryFound(this.currentNight === 1 ? 'burnedRibbon' : 'night' + this.currentNight);
         this.persist();
         this.state = 'run';
         this.room.doorsOpen = true;
@@ -412,19 +507,15 @@ class Game {
   }
 
   updateDeath(dt) {
-    if (Input.confirm()) {
+    if (Input.confirm() && this.fadeDir === 0) {
       this.save.nights++;
+      this.story.endRun('death'); // RunSummary — Elsie reacts when spoken to
       this.persist();
-      const run = this.run; // stats outlive setupDorm's reset
       this.startFade(() => {
         this.setupDorm();
         this.state = 'dorm';
-        const line = run.dollKills > 0
-          ? { who: 'Elsie', text: '...You\'re back. The house let you back. It always does, when it isn\'t finished with you.' }
-          : { who: 'Elsie', text: 'You did your best. That counts, doesn\'t it?' };
         this.dialogue.say([
           { who: '', text: 'Mallow wakes on the Dormitory floor, restitched by small careful hands.' },
-          line,
         ]);
       });
     }
@@ -434,7 +525,7 @@ class Game {
     const night = this.currentNight;
     const data = this.nightData;
     const run = this.run; // stats outlive setupDorm's reset
-    if (run.dollsSeen > 0 && run.dollKills === 0) this.save.comfort++; // mercy feeds the moral axis
+    this.story.endRun('victory'); // RunSummary — Elsie reacts when spoken to
     this.save.nights++;
     this.save.wonOnce = true;
     this.save.nightsCleared = Math.max(this.save.nightsCleared, night);
@@ -465,16 +556,30 @@ class Game {
       ],
     };
     lines.push(...(REACT[night] || REACT[1]));
-    if (run.dollKills > 0) {
-      lines.push({ who: 'Elsie', text: 'The dolls stopped crying tonight. I don\'t want to talk about it.' });
-    } else if (run.dollsSeen > 0) {
-      lines.push({ who: 'Elsie', text: 'You kept your promise. The crying ones... I heard them go quiet the kind way.' });
+    if (night === 1) {
+      // Night 1's doll reaction, memory reaction, and wall rule reveal are
+      // story dialogue — Elsie delivers them when spoken to (storyDialogue.js).
+      lines.push({ who: '', text: 'Elsie is watching Mallow very carefully, like she has something to say.' });
+    } else {
+      if (run.dollKills > 0) {
+        lines.push({ who: 'Elsie', text: 'The dolls stopped crying tonight. I don\'t want to talk about it.' });
+      } else if (run.dollsSeen > 0) {
+        lines.push({ who: 'Elsie', text: 'You kept your promise. The crying ones... I heard them go quiet the kind way.' });
+      }
+      if (this.save.memoriesSeen[night]) {
+        lines.push({ who: 'Elsie', text: 'You saw one of the little rooms, didn\'t you. You have that look. Like a candle that\'s seen a draught.' });
+      }
+      lines.push({ who: '', text: 'Behind Elsie, fresh paint glistens on the Dormitory wall.' });
+      lines.push({ who: '', text: data.rule + '.' });
     }
-    if (this.save.memoriesSeen[night]) {
-      lines.push({ who: 'Elsie', text: 'You saw one of the little rooms, didn\'t you. You have that look. Like a candle that\'s seen a draught.' });
-    }
-    lines.push({ who: '', text: 'Behind Elsie, fresh paint glistens on the Dormitory wall.' });
-    lines.push({ who: '', text: data.rule + '.' });
+    // a keepsake carried home stirs another bed (children.js)
+    const WAKE = {
+      1: 'In the third bed, someone who was not there before rolls over and growls in their sleep.',
+      2: 'In the second bed, a girl is sitting up, already watching Mallow, already smiling.',
+      3: 'From somewhere near the blanket pile, a mask-muffled voice snickers.',
+      4: 'In the far corner, a hooded shape stands very still, holding a small chalkboard.',
+    };
+    if (WAKE[night]) lines.push({ who: '', text: WAKE[night] });
     this.dialogue.say(lines, () => { this.state = 'end'; });
   }
 
@@ -545,7 +650,7 @@ class Game {
     }
 
     // pickups
-    const KSPR = { flame: SPR.flamePickup, stitch: SPR.stitchPickup, ribbon: SPR.ribbon, chalk: SPR.chalk, spoon: SPR.spoon, musicbox: SPR.musicbox, locket: SPR.locket };
+    const KSPR = { flame: SPR.flamePickup, stitch: SPR.stitchPickup, thread: SPR.thread, ribbon: SPR.ribbon, chalk: SPR.chalk, spoon: SPR.spoon, musicbox: SPR.musicbox, locket: SPR.locket };
     for (const p of this.pickups) {
       const spr = KSPR[p.kind] || SPR.ribbon;
       const bob = Math.sin(performance.now() / 250 + p.x) * 1.5;
@@ -569,11 +674,19 @@ class Game {
     // entities sorted by y
     const ents = [...this.enemies];
     if (!this.player.dead || this.state === 'dying') ents.push(this.player);
-    if (this.state === 'dorm') ents.push({ y: this.elsie.y, drawElsie: true });
+    if (this.state === 'dorm') {
+      ents.push({ y: this.elsie.y, drawElsie: true });
+      for (const c of awakeChildren(this.save)) {
+        const p = childPos(c);
+        ents.push({ y: p.y, drawChild: c, px: p.x, py: p.y });
+      }
+    }
     ents.sort((a, b) => a.y - b.y);
     for (const e of ents) {
       if (e.drawElsie) {
         ctx.drawImage(SPR.elsie, Math.round(ox + this.elsie.x - 5), Math.round(oy + this.elsie.y - 10));
+      } else if (e.drawChild) {
+        ctx.drawImage(SPR[e.drawChild.spr], Math.round(ox + e.px - 5), Math.round(oy + e.py - 10));
       } else e.draw(ctx, ox, oy);
     }
 
@@ -594,6 +707,7 @@ class Game {
     this.drawHud();
 
     if (this.state === 'pretendChoice') this.drawPretendChoice();
+    if (this.state === 'cradle') this.drawCradle();
     if (this.state === 'memoryScene') this.drawMemoryScene();
     if (this.state === 'death') this.drawDeath();
     this.dialogue.draw(ctx, W, H);
@@ -618,15 +732,32 @@ class Game {
   }
 
   drawDormOverlay(ox, oy) {
+    const st = this.story.state;
     ctx.font = '7px monospace';
     ctx.fillStyle = 'rgba(232,224,216,0.5)';
     ctx.fillText('GOOD CHILDREN DO NOT CRY', ox + 210, oy + 10);
-    // rules earned so far, painted on the wall
+    // rules earned so far, painted on the wall.
+    // Night 1's rule only appears once the story has revealed it (Scene 9).
     for (let n = 1; n <= this.save.nightsCleared && n <= LAST_NIGHT; n++) {
+      if (n === 1 && !st.hasSeenGoodChildrenDoNotRemember) continue;
       const pulse = 0.55 + 0.3 * Math.sin(performance.now() / 400 + n);
       ctx.fillStyle = `rgba(176,58,72,${pulse})`;
       const rule = NIGHTS[n].rule.replace(/^RULE \d+: /, '');
       ctx.fillText(rule, ox + 200 - (n - 1) * 4, oy + 10 + n * 12);
+    }
+    // hub story objects (data-driven; see hub.js)
+    for (const o of HUB_OBJECTS) {
+      if (!o.visible(st)) continue;
+      const p = hubObjectPos(o);
+      if (o.spr) {
+        ctx.drawImage(SPR[o.spr], Math.round(ox + p.x), Math.round(oy + p.y));
+      } else if (o.draw) {
+        o.draw(ctx, ox + p.x, oy + p.y, st);
+      }
+      if (!this.dialogue.active && dist(this.player, p) < 18 && dist(this.player, this.elsie) >= 22) {
+        ctx.fillStyle = '#ffe08a';
+        ctx.fillText(`[E] ${o.prompt}`, ox + p.x - 8, oy + p.y - 6);
+      }
     }
     if (this.save.endingSeen) {
       ctx.fillStyle = `rgba(255,224,138,${0.6 + 0.3 * Math.sin(performance.now() / 500)})`;
@@ -636,6 +767,17 @@ class Game {
     if (!this.dialogue.active && dist(this.player, this.elsie) < 22) {
       ctx.fillStyle = '#ffe08a';
       ctx.fillText('[E] talk', ox + this.elsie.x - 12, oy + this.elsie.y - 16);
+    }
+    // prompts for the other children
+    if (!this.dialogue.active) {
+      for (const c of awakeChildren(this.save)) {
+        const p = childPos(c);
+        if (dist(this.player, p) < 22) {
+          ctx.fillStyle = '#ffe08a';
+          ctx.fillText('[E] talk', ox + p.x - 12, oy + p.y - 16);
+          break;
+        }
+      }
     }
     if (this.room.doorsOpen && !this.dialogue.active) {
       ctx.fillStyle = 'rgba(255,224,138,0.7)';
@@ -687,6 +829,10 @@ class Game {
     for (const k of KEEPSAKE_ORDER) {
       if (this.save.keepsakes[k]) { ctx.drawImage(kspr[k], kx, 22); kx += 10; }
     }
+    // thread (persistent currency for the Candle Cradle)
+    ctx.drawImage(SPR.thread, kx + 4, 22);
+    ctx.fillStyle = '#b8b0a8';
+    ctx.fillText(`${this.save.thread}`, kx + 12, 28);
     // room / place label
     ctx.fillStyle = '#b8b0a8';
     if (this.room.type !== 'dorm') {
@@ -740,6 +886,49 @@ class Game {
     ctx.font = '7px monospace';
     ctx.fillText('WASD move · J/SPACE attack · K/SHIFT dodge · E talk · L candle burst', W / 2, 250);
     ctx.fillText('3:33 AM. The house is awake.', W / 2, 262);
+    ctx.textAlign = 'left';
+  }
+
+  drawCradle() {
+    ctx.fillStyle = 'rgba(10,8,16,0.85)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffe08a';
+    ctx.font = '10px monospace';
+    ctx.fillText('THE CANDLE CRADLE', W / 2, 52);
+    ctx.font = '7px monospace';
+    ctx.fillStyle = '#b8b0a8';
+    ctx.fillText('The candle keeps what Mallow saves. Thread buys small mercies.', W / 2, 66);
+    ctx.drawImage(SPR.thread, W / 2 - 26, 74);
+    ctx.fillStyle = '#e8e0d8';
+    ctx.fillText(`THREAD: ${this.save.thread}`, W / 2 + 6, 80);
+    const opts = this.cradleOptions();
+    for (let i = 0; i < opts.length; i++) {
+      const y = 100 + i * 28;
+      const sel = this.cradleSel === i;
+      ctx.fillStyle = sel ? '#322d44' : '#1c1626';
+      ctx.fillRect(W / 2 - 150, y, 300, 24);
+      ctx.strokeStyle = sel ? '#ffe08a' : '#55506a';
+      ctx.strokeRect(W / 2 - 149.5, y + 0.5, 299, 23);
+      const o = opts[i];
+      const afford = o.id === '_close' || this.save.thread >= o.cost;
+      ctx.fillStyle = sel ? (afford ? '#e8e0d8' : '#b03a48') : '#b8b0a8';
+      ctx.font = '8px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(o.name, W / 2 - 140, y + 10);
+      if (o.id !== '_close') {
+        ctx.textAlign = 'right';
+        ctx.fillText(`${o.cost} thread`, W / 2 + 140, y + 10);
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#7a6a92';
+        ctx.font = '7px monospace';
+        ctx.fillText(o.desc, W / 2 - 140, y + 20);
+      }
+      ctx.textAlign = 'center';
+    }
+    ctx.fillStyle = '#55506a';
+    ctx.font = '7px monospace';
+    ctx.fillText('[W]/[S] choose · [ENTER] spend · [K] step away', W / 2, 100 + opts.length * 28 + 14);
     ctx.textAlign = 'left';
   }
 
@@ -835,7 +1024,11 @@ class Game {
     const pulse = 0.55 + 0.3 * Math.sin(performance.now() / 400);
     ctx.fillStyle = `rgba(176,58,72,${pulse})`;
     ctx.font = '11px monospace';
-    ctx.fillText(data.rule, W / 2, 135);
+    // Night 1's rule only exists once the Burned Ribbon memory has been found
+    const ruleText = (n === 1 && !this.story.state.burnedRibbonFound)
+      ? 'THE WALL IS WAITING FOR A NEW RULE.'
+      : data.rule;
+    ctx.fillText(ruleText, W / 2, 135);
     ctx.fillStyle = '#7a6a92';
     ctx.font = '8px monospace';
     ctx.fillText(`Mallow keeps ${data.keepsakeName}. (${data.keepsakeDesc})`, W / 2, 165);
