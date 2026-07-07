@@ -48,7 +48,10 @@ Death is part of the story. The house always lets you back.
 ```
 index.html        entry point
 css/style.css     canvas scaling
-js/main.js        game states, hub, run manager, HUD, story, endings
+js/main.js        game states, hub, HUD, story, endings
+js/save.js        save/load, migration, permanent progression (keepsakes, bonds, moral axis)
+js/run.js         per-run state: room plan, active pretends, run stats
+js/upgrades.js    data-driven Pretend + Keepsake effect tables
 js/nights.js      the five nights: floors, bosses, keepsakes, memories, rules
 js/player.js      Mallow: movement, dodge, attack, stitches, candleflame
 js/enemies.js     enemies + bosses for all five floors
@@ -58,4 +61,19 @@ js/sprites.js     code-generated pixel sprites
 js/dialogue.js    typewriter dialogue queue
 js/input.js       keyboard input
 js/audio.js       WebAudio-generated sound effects
+js/debug.js       developer shortcuts (only with ?dev=1)
 ```
+
+## Developer shortcuts
+
+Open the game with `?dev=1` (e.g. `http://localhost:8000/?dev=1`) to enable debug keys:
+
+| Key | Effect |
+|---|---|
+| F1 | Clear the current room (spares crying dolls) |
+| F2 | Skip to the boss room |
+| F3 | Grant all keepsakes |
+| F4 | Cycle the next night (1–5) |
+| F5 | Full stitches + full candleflame |
+| F6 | Wipe the save and reload |
+| F7 | Kill everything in the room (bosses included) |

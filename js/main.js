@@ -8,35 +8,20 @@ import { Player } from './player.js';
 import { buildRoom, spawnEnemies, drawRoom } from './rooms.js';
 import { W, H, TS, COLS, ROWS, OX, OY, overlap, dist, solidAt } from './world.js';
 import { NIGHTS, LAST_NIGHT, PRETENDS, KEEPSAKE_ORDER } from './nights.js';
+import { loadSave, writeSave } from './save.js';
+import { RunState } from './run.js';
+import { computeMods, PRETEND_EFFECTS } from './upgrades.js';
+import { attachDebug } from './debug.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 ctx.imageSmoothingEnabled = false;
 
-const SAVE_KEY = 'goodnightHollowSave';
-
-function loadSave() {
-  try { return JSON.parse(localStorage.getItem(SAVE_KEY)) || {}; }
-  catch (e) { return {}; }
-}
-function writeSave(s) {
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify(s)); } catch (e) { /* private mode */ }
-}
-
 class Game {
   constructor() {
     this.state = 'title';
-    this.save = Object.assign({
-      nights: 0, hasRibbon: false, sawMemory: false,
-      dollKillsTotal: 0, wonOnce: false, metElsie: false,
-      nightsCleared: 0, keepsakes: {}, memoriesSeen: {}, endingSeen: false,
-    }, loadSave());
-    // migrate the First Night Demo save format
-    if (!this.save.keepsakes) this.save.keepsakes = {};
-    if (!this.save.memoriesSeen) this.save.memoriesSeen = {};
-    if (this.save.hasRibbon && !this.save.keepsakes.ribbon) this.save.keepsakes.ribbon = true;
-    if (this.save.wonOnce && !this.save.nightsCleared) this.save.nightsCleared = 1;
-    if (this.save.sawMemory && !this.save.memoriesSeen[1]) this.save.memoriesSeen[1] = true;
+    this.save = loadSave(); // migration/versioning lives in save.js
+    this.run = null;        // RunState while a night is being attempted
     this.dialogue = new Dialogue();
     this.particles = [];
     this.pickups = [];
@@ -50,46 +35,46 @@ class Game {
 
   persist() { writeSave(this.save); }
 
+  // combined keepsake + pretend modifiers; recomputed whenever either changes
+  refreshMods() {
+    this.mods = computeMods(this.save.keepsakes, this.run ? this.run.pretends : []);
+    if (this.player) {
+      this.player.maxStitches = this.player.baseMaxStitches + this.mods.bonusMaxStitches;
+      this.player.stitches = Math.min(this.player.stitches, this.player.maxStitches);
+    }
+  }
+
   // the night about to be (or being) attempted
-  get currentNight() { return this.night || Math.min(this.save.nightsCleared + 1, LAST_NIGHT); }
+  get currentNight() { return this.run ? this.run.night : Math.min(this.save.nightsCleared + 1, LAST_NIGHT); }
   get nightData() { return NIGHTS[this.currentNight]; }
 
   // ---------- setup ----------
   setupDorm() {
     this.room = buildRoom('dorm');
     this.player = new Player(this);
-    if (this.save.keepsakes.ribbon) { this.player.maxStitches = 7; this.player.stitches = 7; }
+    this.run = null;
+    this.refreshMods();
+    this.player.stitches = this.player.maxStitches;
     this.player.x = 5 * TS; this.player.y = 8 * TS;
     this.elsie = { x: 4.2 * TS, y: 3.4 * TS, w: 10, h: 12 };
     this.enemies = [];
     this.pickups = [];
     this.projectiles = [];
-    this.night = null;
     this.room.doorsOpen = this.save.metElsie; // the house is never truly done with you
     this.bellRung = this.save.metElsie;
   }
 
   startRun() {
-    this.night = Math.min(this.save.nightsCleared + 1, LAST_NIGHT);
-    const n = this.night;
-    this.runRooms = [
-      buildRoom('combat', 0, n), buildRoom('combat', 1, n),
-      buildRoom('memory', 0, n), buildRoom('combat', 2, n),
-      buildRoom('combat', 3, n), buildRoom('boss', 0, n),
-    ];
-    this.roomIndex = 0;
-    this.dollKillsRun = 0;
-    this.dollsSeen = 0;
-    this.pretendOffered = false;
-    this.pretend = null;
+    this.run = new RunState(Math.min(this.save.nightsCleared + 1, LAST_NIGHT));
+    this.refreshMods();
     this.player.locketUsed = false;
     this.state = 'run';
     this.enterRoom(0);
   }
 
   enterRoom(i) {
-    this.roomIndex = i;
-    this.room = this.runRooms[i];
+    this.run.roomIndex = i;
+    this.room = this.run.rooms[i];
     this.player.x = 1.6 * TS;
     this.player.y = 7 * TS;
     this.enemies = [];
@@ -98,7 +83,7 @@ class Game {
     if (this.room.type === 'combat' || this.room.type === 'boss') {
       this.room.doorsOpen = false;
       this.enemies = spawnEnemies(this.room, this);
-      this.dollsSeen += this.enemies.filter(e => e.isDoll).length;
+      this.run.dollsSeen += this.enemies.filter(e => e.isDoll).length;
       Sfx.doorLock();
       if (this.room.type === 'boss') {
         this.dialogue.say([
@@ -116,8 +101,9 @@ class Game {
   spawnProjectile(p) { this.projectiles.push(p); }
 
   onDollKilled(doll) {
-    this.dollKillsRun++;
+    this.run.dollKills++;
     this.save.dollKillsTotal++;
+    this.save.truth++; // cruelty is a kind of truth; the moral axis remembers
     this.persist();
     // the house rewards cruelty
     this.pickups.push({ kind: 'flame', x: doll.x, y: doll.y });
@@ -129,14 +115,15 @@ class Game {
   onRoomCleared() {
     this.room.cleared = true;
     this.room.doorsOpen = true;
+    this.run.roomsCleared++;
     Sfx.doorOpen();
     const cx = 14 * TS, cy = 7 * TS;
     this.pickups.push({ kind: 'flame', x: cx - 8, y: cy });
     this.pickups.push({ kind: 'stitch', x: cx + 8, y: cy });
     this.player.gainFlame(20);
-    if (this.pretend === 'mended') this.player.heal(1);
-    if (!this.pretendOffered && this.room.type === 'combat') {
-      this.pretendOffered = true;
+    if (this.mods.healOnRoomClear) this.player.heal(this.mods.healOnRoomClear);
+    if (!this.run.pretendOffered && this.room.type === 'combat') {
+      this.run.pretendOffered = true;
       this.pretendSel = 0;
       // offer two pretends, chosen by the night so each floor feels different
       const pool = [...PRETENDS];
@@ -321,6 +308,7 @@ class Game {
 
   updateRun(dt) {
     if (this.dialogue.active) { this.dialogue.update(dt); return; }
+    this.run.timeElapsed += dt;
     this.player.update(dt, this.room);
     if (this.player.dead) return;
 
@@ -368,7 +356,7 @@ class Game {
         p.taken = true;
         Sfx.pickup();
         if (p.kind === 'flame') this.player.gainFlame(25);
-        else if (p.kind === 'stitch') this.player.heal(this.save.keepsakes.spoon ? 2 : 1);
+        else if (p.kind === 'stitch') this.player.heal(1 * this.mods.healMult);
         else if (p.keepsake) {
           this.save.keepsakes[p.kind] = true;
           if (p.kind === 'ribbon') this.save.hasRibbon = true;
@@ -381,7 +369,7 @@ class Game {
 
     // exit east door -> next room
     if (this.room.doorsOpen && this.player.x > (COLS - 1.6) * TS && this.player.y > 5.4 * TS && this.player.y < 8.6 * TS) {
-      const next = this.roomIndex + 1;
+      const next = this.run.roomIndex + 1;
       this.room.doorsOpen = false;
       this.startFade(() => this.enterRoom(next));
     }
@@ -394,14 +382,11 @@ class Game {
     }
     if (Input.confirm()) {
       const pick = this.pretendOptions[this.pretendSel];
-      this.pretend = pick.id;
+      this.run.addPretend(pick.id);
       this.pretendName = pick.name;
-      if (pick.id === 'brave') this.player.pretendBrave = true;
-      else if (pick.id === 'loved') { this.player.maxStitches += 2; this.player.heal(2); }
-      else if (pick.id === 'quick') this.player.pretendQuick = true;
-      else if (pick.id === 'ember') this.player.pretendEmber = true;
-      else if (pick.id === 'fierce') this.player.pretendFierce = true;
-      // 'mended' is handled in onRoomCleared
+      this.refreshMods();
+      const eff = PRETEND_EFFECTS[pick.id];
+      if (eff && eff.healNow) this.player.heal(eff.healNow);
       Sfx.upgrade();
       this.state = 'run';
     }
@@ -430,10 +415,11 @@ class Game {
     if (Input.confirm()) {
       this.save.nights++;
       this.persist();
+      const run = this.run; // stats outlive setupDorm's reset
       this.startFade(() => {
         this.setupDorm();
         this.state = 'dorm';
-        const line = this.dollKillsRun > 0
+        const line = run.dollKills > 0
           ? { who: 'Elsie', text: '...You\'re back. The house let you back. It always does, when it isn\'t finished with you.' }
           : { who: 'Elsie', text: 'You did your best. That counts, doesn\'t it?' };
         this.dialogue.say([
@@ -447,6 +433,8 @@ class Game {
   victorySequence() {
     const night = this.currentNight;
     const data = this.nightData;
+    const run = this.run; // stats outlive setupDorm's reset
+    if (run.dollsSeen > 0 && run.dollKills === 0) this.save.comfort++; // mercy feeds the moral axis
     this.save.nights++;
     this.save.wonOnce = true;
     this.save.nightsCleared = Math.max(this.save.nightsCleared, night);
@@ -477,9 +465,9 @@ class Game {
       ],
     };
     lines.push(...(REACT[night] || REACT[1]));
-    if (this.dollKillsRun > 0) {
+    if (run.dollKills > 0) {
       lines.push({ who: 'Elsie', text: 'The dolls stopped crying tonight. I don\'t want to talk about it.' });
-    } else if (this.dollsSeen > 0) {
+    } else if (run.dollsSeen > 0) {
       lines.push({ who: 'Elsie', text: 'You kept your promise. The crying ones... I heard them go quiet the kind way.' });
     }
     if (this.save.memoriesSeen[night]) {
@@ -689,7 +677,7 @@ class Game {
       ctx.fillText('[L] burst', 208, 17);
     }
     // pretend
-    if (this.pretend && this.state === 'run') {
+    if (this.run && this.run.pretends.length && this.state === 'run') {
       ctx.fillStyle = '#9fd8c0';
       ctx.fillText(this.pretendName || '', 260, 18);
     }
@@ -705,7 +693,7 @@ class Game {
       const floor = this.nightData.floor;
       const label = this.room.type === 'boss' ? `${floor} — ???`
         : this.room.type === 'memory' ? `${floor} — a quiet room`
-        : `${floor} — room ${this.roomIndex + 1}`;
+        : `${floor} — room ${this.run.roomIndex + 1}`;
       ctx.fillText(label, W - 8 - ctx.measureText(label).width, 9);
       const nlabel = `NIGHT ${this.currentNight}`;
       ctx.fillStyle = '#7a6a92';
@@ -824,6 +812,13 @@ class Game {
     ctx.fillStyle = '#b8b0a8';
     ctx.font = '8px monospace';
     ctx.fillText('The house folds Mallow away like a finished bedtime story.', W / 2, 135);
+    if (this.run) {
+      ctx.fillStyle = '#7a6a92';
+      ctx.font = '7px monospace';
+      const mins = Math.floor(this.run.timeElapsed / 60), secs = Math.floor(this.run.timeElapsed % 60);
+      const spared = this.run.dollsSeen - this.run.dollKills;
+      ctx.fillText(`rooms quieted: ${this.run.roomsCleared} · dolls spared: ${spared}/${this.run.dollsSeen} · ${mins}:${String(secs).padStart(2, '0')} in the dark`, W / 2, 152);
+    }
     ctx.fillStyle = '#ffe08a';
     ctx.fillText('press [ENTER] to wake in the Dormitory', W / 2, 175);
     ctx.textAlign = 'left';
@@ -900,6 +895,7 @@ class Game {
 
 const game = new Game();
 window.__game = game; // debug/testing hook
+attachDebug(game);    // dev shortcuts, only active with ?dev=1
 let last = performance.now();
 function loop(now) {
   const dt = Math.min(0.05, (now - last) / 1000);

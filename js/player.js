@@ -9,6 +9,7 @@ export class Player {
     this.game = game;
     this.x = 0; this.y = 0;
     this.w = 9; this.h = 10;
+    this.baseMaxStitches = 6;   // permanent/temporary bonuses come from game.mods
     this.maxStitches = 6;
     this.stitches = 6;
     this.flame = 0;          // candleflame 0-100
@@ -19,15 +20,12 @@ export class Player {
     this.attackCd = 0;
     this.iframes = 0;
     this.dead = false;
-    this.pretendBrave = false;   // +dmg below half health
-    this.pretendQuick = false;   // faster feet + dodge
-    this.pretendEmber = false;   // +flame gain
-    this.pretendFierce = false;  // faster needle
     this.vxLast = 0; this.vyLast = 0; // for "hold still" boss gazes
     this.hitThisSwing = new Set();
   }
 
   get keepsakes() { return this.game.save.keepsakes || {}; }
+  get mods() { return this.game.mods; }
 
   get attacking() { return this.attackT > 0; }
 
@@ -42,14 +40,15 @@ export class Player {
   }
 
   damage() {
-    let d = 1;
-    if (this.pretendBrave && this.stitches <= this.maxStitches / 2) d = 2;
+    let d = 1 * this.mods.damageMult;
+    if (this.stitches <= this.maxStitches / 2) d *= this.mods.damageMultLowHp;
     return d;
   }
 
   hurt(amount, fromX, fromY) {
     if (this.iframes > 0 || this.dead || this.dodgeT > 0) return;
     this.stitches -= amount;
+    if (this.game.run) this.game.run.damageTaken += amount;
     this.iframes = 1.0;
     Sfx.hurt();
     this.game.shake(4, 0.25);
@@ -59,7 +58,7 @@ export class Player {
     this.kbT = 0.15;
     if (this.stitches <= 0) {
       // the mother's locket refuses, once each night
-      if (this.keepsakes.locket && !this.locketUsed) {
+      if (this.mods.reviveOncePerNight && !this.locketUsed) {
         this.locketUsed = true;
         this.stitches = 1;
         this.iframes = 2.0;
@@ -73,10 +72,7 @@ export class Player {
   }
 
   gainFlame(n) {
-    let m = 1;
-    if (this.pretendEmber) m *= 1.5;
-    if (this.keepsakes.chalk) m *= 1.5;
-    this.flame = Math.min(100, this.flame + n * m);
+    this.flame = Math.min(100, this.flame + n * this.mods.flameGainMult);
   }
   heal(n) { this.stitches = Math.min(this.maxStitches, this.stitches + n); }
 
@@ -96,8 +92,7 @@ export class Player {
       else this.facing = { x: 0, y: Math.sign(my) };
     }
 
-    let speed = 85;
-    if (this.pretendQuick) speed *= 1.2;
+    let speed = 85 * this.mods.speedMult;
     if (this.slowed) speed *= 0.5;
     this.slowed = false;
 
@@ -117,16 +112,13 @@ export class Player {
         const l = Math.hypot(mx, my);
         const dx = l ? mx / l : this.facing.x, dy = l ? my / l : this.facing.y;
         this.dodgeT = 0.18;
-        let cd = 0.6;
-        if (this.pretendQuick) cd *= 0.7;
-        if (this.keepsakes.musicbox) cd *= 0.5;
-        this.dodgeCd = cd;
+        this.dodgeCd = 0.6 * this.mods.dodgeCdMult;
         this.dvx = dx * 250; this.dvy = dy * 250;
         Sfx.dodge();
       }
       if (Input.attack() && this.attackCd <= 0) {
         this.attackT = 0.12;
-        this.attackCd = this.pretendFierce ? 0.2 : 0.32;
+        this.attackCd = 0.32 * this.mods.attackCdMult;
         this.hitThisSwing = new Set();
         Sfx.swing();
       }
