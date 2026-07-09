@@ -39,8 +39,15 @@ function noise(dur, vol = 0.06) {
 
 export const Sfx = {
   unlock() { ac(); },
-  swing() { tone(220, 0.08, 'sawtooth', 0.05, -120); },
-  hit() { noise(0.08, 0.08); tone(140, 0.08, 'square', 0.06, -60); },
+  swing() { noise(0.05, 0.03); tone(300, 0.07, 'sawtooth', 0.045, -190); },
+  // punchier connect: a noise crack + a body tone that pitches up with the combo,
+  // and a low thump for weight.
+  hit(combo = 0) {
+    const p = Math.min(12, combo);
+    noise(0.06, 0.10);
+    tone(175 + p * 16, 0.07, 'square', 0.07, -80);
+    tone(90, 0.05, 'sine', 0.06, -24);
+  },
   hurt() { tone(110, 0.25, 'sawtooth', 0.1, -70); noise(0.15, 0.06); },
   dodge() { tone(500, 0.1, 'sine', 0.05, 250); },
   enemyDie() { noise(0.15, 0.07); tone(90, 0.2, 'triangle', 0.08, -50); },

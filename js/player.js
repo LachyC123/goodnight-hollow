@@ -25,6 +25,8 @@ export class Player {
     this.animPhase = 0;      // walk-cycle phase
     this.moving = false;
     this.ghosts = [];        // dodge afterimages
+    this.lungeT = 0;         // forward step-in on attack
+    this.lvx = 0; this.lvy = 0;
   }
 
   get keepsakes() { return this.game.save.keepsakes || {}; }
@@ -54,8 +56,9 @@ export class Player {
     if (this.game.run) this.game.run.damageTaken += amount;
     this.iframes = 1.0;
     Sfx.hurt();
-    this.game.shake(4, 0.25);
-    this.game.damageFlash = 0.2;
+    this.game.shake(5, 0.3);
+    this.game.hitStop = Math.max(this.game.hitStop, 0.06);   // a beat of impact
+    this.game.damageFlash = 0.25;
     const dx = this.x - fromX, dy = this.y - fromY;
     const l = Math.hypot(dx, dy) || 1;
     this.kbx = (dx / l) * 160; this.kby = (dy / l) * 160;
@@ -132,6 +135,9 @@ export class Player {
         this.attackT = 0.12;
         this.attackCd = 0.32 * this.mods.attackCdMult;
         this.hitThisSwing = new Set();
+        // step into the swing — commitment and weight
+        this.lungeT = 0.11;
+        this.lvx = this.facing.x * 90; this.lvy = this.facing.y * 90;
         Sfx.swing();
       }
       // Candleflame burst (special)
@@ -139,6 +145,12 @@ export class Player {
         this.flame -= 50;
         this.game.flameBurst(this.x, this.y);
       }
+    }
+    // attack lunge — a short decaying forward push, layered over any movement
+    if (this.lungeT > 0 && this.kbT <= 0 && this.dodgeT <= 0) {
+      this.lungeT -= dt;
+      moveEntity(this, this.lvx * dt, this.lvy * dt, room);
+      this.lvx *= 0.82; this.lvy *= 0.82;
     }
     this.vxLast = (this.x - px0) / Math.max(dt, 0.0001);
     this.vyLast = (this.y - py0) / Math.max(dt, 0.0001);
@@ -160,9 +172,22 @@ export class Player {
       const bob = this.moving
         ? -Math.abs(Math.sin(this.animPhase)) * 2
         : Math.sin(now / 600) * 0.6;
-      const px = Math.round(ox + this.x - spr.width / 2);
-      const py = Math.round(oy + this.y - spr.height + 4 + bob);
-      ctx.drawImage(spr, px, py);
+      const baseY = oy + this.y + 4 + bob;   // feet baseline
+      if (this.attackT > 0) {
+        // anticipation → follow-through: stretch along the swing axis, squash across
+        const prog = 1 - this.attackT / 0.12;
+        const punch = Math.sin(prog * Math.PI);
+        let sx = 1, sy = 1;
+        if (this.facing.x !== 0) { sx = 1 + 0.22 * punch; sy = 1 - 0.12 * punch; }
+        else { sy = 1 + 0.22 * punch; sx = 1 - 0.12 * punch; }
+        ctx.save();
+        ctx.translate(ox + this.x, baseY);
+        ctx.scale(sx, sy);
+        ctx.drawImage(spr, -spr.width / 2, -spr.height);
+        ctx.restore();
+      } else {
+        ctx.drawImage(spr, Math.round(ox + this.x - spr.width / 2), Math.round(baseY - spr.height));
+      }
       // low health: leaking stuffing
       if (this.stitches <= 2 && Math.random() < 0.05) {
         this.game.puff(this.x, this.y, '#e8e0d8');

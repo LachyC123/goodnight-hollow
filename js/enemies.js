@@ -28,25 +28,32 @@ class Enemy {
     this.touchable = true; // takes hits
     this.bob = true;                          // gentle idle sway
     this.bobPhase = Math.random() * Math.PI * 2;
+    this.stun = 0;                            // brief flinch after a hit (non-bosses)
   }
   hit(dmg, from) {
     if (this.dead || !this.touchable) return;
     this.hp -= dmg;
-    this.flash = 0.1;
-    Sfx.hit();
+    this.flash = 0.12;
     const dx = this.x - from.x, dy = this.y - from.y;
     const l = Math.hypot(dx, dy) || 1;
-    this.x += (dx / l) * 5; this.y += (dy / l) * 5;
-    // sparks fly from the struck point, toward where the needle came from
-    this.game.sparks(this.x - (dx / l) * 4, this.y - (dy / l) * 4, '#ffe0a0', 5);
+    const nx = dx / l, ny = dy / l;
+    // knockback (bosses stand firmer) + a short flinch so the hit reads
+    const kb = this.isBoss ? 3 : 8;
+    this.x += nx * kb; this.y += ny * kb;
+    if (!this.isBoss) this.stun = Math.max(this.stun, 0.08);
+    const cx = this.x - nx * 4, cy = this.y - ny * 4;   // contact point
+    this.game.sparks(cx, cy, '#ffe6b0', 7);
     this.game.player.gainFlame(6);
-    if (this.hp <= 0) this.die();
+    const killed = this.hp <= 0;
+    this.game.impact(cx, cy, killed);                    // hitstop + shake + combo + ring
+    Sfx.hit(this.game.combo);
+    if (killed) this.die();
   }
   die() {
     this.dead = true;
     Sfx.enemyDie();
     this.game.puff(this.x, this.y, '#55506a');
-    this.game.sparks(this.x, this.y, '#ffd0a0', 9);
+    this.game.sparks(this.x, this.y, '#ffd0a0', 12);
   }
   update(dt, room, player) {}
   // a throbbing red ring on the floor while winding up to strike. Drawn from the
@@ -66,15 +73,18 @@ class Enemy {
   }
   drawSprite(ctx, ox, oy, spr) {
     const b = this.bob ? Math.sin(performance.now() / 320 + this.bobPhase) * 1.1 : 0;
-    const px = Math.round(ox + this.x - spr.width / 2);
-    const py = Math.round(oy + this.y - spr.height + 4 + b);
+    const cx = ox + this.x, baseY = oy + this.y + 4 + b;   // feet baseline
     if (this.flash > 0) {
+      // white hit-flash + a quick scale pop, both anchored at the feet
+      const s = 1 + this.flash * 1.8;
       ctx.save();
       ctx.filter = 'brightness(3)';
-      ctx.drawImage(spr, px, py);
+      ctx.translate(cx, baseY);
+      ctx.scale(s, s);
+      ctx.drawImage(spr, -spr.width / 2, -spr.height);
       ctx.restore();
     } else {
-      ctx.drawImage(spr, px, py);
+      ctx.drawImage(spr, Math.round(cx - spr.width / 2), Math.round(baseY - spr.height));
     }
   }
 }
