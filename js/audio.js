@@ -63,6 +63,8 @@ export const Sfx = {
   bell() { tone(1245, 0.9, 'sine', 0.07, -20); tone(830, 0.9, 'sine', 0.05, -10); },
   talk() { tone(440 + Math.random() * 120, 0.04, 'square', 0.03); },
   bossRoar() { tone(70, 0.7, 'sawtooth', 0.12, -30); noise(0.4, 0.08); },
+  // faint ambient house creak for the Dormitory
+  creak() { tone(80 + Math.random() * 40, 0.5, 'triangle', 0.03, -20); noise(0.2, 0.015); },
   explode() { noise(0.35, 0.12); tone(60, 0.4, 'sawtooth', 0.1, -30); },
   upgrade() { tone(523, 0.12, 'sine', 0.06); setTimeout(() => tone(659, 0.12, 'sine', 0.06), 110); setTimeout(() => tone(784, 0.2, 'sine', 0.06), 220); },
 };

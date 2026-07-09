@@ -254,7 +254,7 @@ export class Nanny extends Enemy {
     this.zones = [];   // lullaby zones {x,y,t,active}
     this.shakeX = 0;
   }
-  get phase2() { return this.hp <= this.maxHp / 2; }
+  get phase2() { return this.hp <= this.maxHp * 0.6; }   // enrage sooner, stay aggressive longer
   hit(dmg, from) {
     if (this.state === 'intro') return;
     super.hit(dmg, from);
@@ -630,7 +630,7 @@ class Boss extends Enemy {
     this.state = 'intro';
     this.t = 1.2;
   }
-  get phase2() { return this.hp <= this.maxHp / 2; }
+  get phase2() { return this.hp <= this.maxHp * 0.6; }   // enrage sooner, stay aggressive longer
   hit(dmg, from) {
     if (this.state === 'intro') return;
     super.hit(dmg, from);

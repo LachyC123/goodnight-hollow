@@ -50,7 +50,7 @@ export class Player {
   damage() {
     let d = 1 * this.mods.damageMult;
     if (this.stitches <= this.maxStitches / 2) d *= this.mods.damageMultLowHp;
-    if (this.flourish) d *= 2.2;                        // combo finisher hits hard
+    if (this.flourish) d *= 1.8;                        // combo finisher hits hard
     return d;
   }
 
@@ -63,7 +63,7 @@ export class Player {
     }
     this.stitches -= amount;
     if (this.game.run) this.game.run.damageTaken += amount;
-    this.iframes = 1.0;
+    this.iframes = 0.8;   // shorter mercy window — pressure punishes greed
     Sfx.hurt();
     this.game.shake(5, 0.3);
     this.game.hitStop = Math.max(this.game.hitStop, 0.06);   // a beat of impact

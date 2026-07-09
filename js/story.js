@@ -113,14 +113,25 @@ export class StoryManager {
 
   onRoomCleared() { this.run.currentRunRoomsCleared++; }
   onDollSeen(n = 1) { this.run.cryingDollsSeen += n; }
-  onCombo(n) { if (n > this.run.currentRunBiggestCombo) this.run.currentRunBiggestCombo = n; }
+  onCombo(n) {
+    if (n > this.run.currentRunBiggestCombo) this.run.currentRunBiggestCombo = n;
+    if (n === 6 || n === 12) this.raiseAwareness(1); // ferocity rouses the house
+  }
   onPerfectDodge() { this.run.currentRunPerfectDodges++; }
-  onParry() { this.run.currentRunParries++; }
+  onParry() { this.run.currentRunParries++; this.raiseAwareness(1); } // defiance is noticed
+
+  // ----- the house learns (houseAwareness 0..100) -----
+  get awareness() { return this.state.houseAwareness || 0; }
+  raiseAwareness(n = 1) {
+    this.state.houseAwareness = Math.min(100, this.awareness + n);
+    this.persist();
+  }
 
   onDollKilled() {
     this.run.currentRunCryingDollsKilled++;
     this.state.totalCryingDollsKilled++;
     this.state.truthScore++; // cruelty is a kind of truth; the moral axis remembers
+    this.raiseAwareness(3);  // the house wakes fastest to cruelty
     this.persist();
   }
 
@@ -139,6 +150,7 @@ export class StoryManager {
 
   onBossDefeated(bossKind) {
     this.run.currentRunBossDefeated = true;
+    this.raiseAwareness(5);  // beating a floor's keeper stirs the whole house
     if (bossKind === 'nanny' && !this.state.nurseryBossDefeated) {
       this.state.nurseryBossDefeated = true;
       // defeating The Nanny after finding the memory adds truth

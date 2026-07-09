@@ -16,6 +16,7 @@ import { StoryManager } from './story.js';
 import { DialogueManager, ELSIE_FIRST_WAKE, nannyIntroLines, NANNY_DEFEAT_LINES } from './storyDialogue.js';
 import { HUB_OBJECTS, hubObjectPos } from './hub.js';
 import { awakeChildren, childPos } from './children.js';
+import { PROLOGUE, CODEX, MEMORY_LORE } from './lore.js';
 import {
   Atmosphere, fxFor, drawShadow, drawLightPools, drawFlames, drawChestFlame,
   drawVignette, drawGrade, drawGrain, drawDanger, drawHeatHaze,
@@ -24,6 +25,19 @@ import {
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 ctx.imageSmoothingEnabled = false;
+
+// The house muttering in the Dormitory — surfaces more as houseAwareness rises.
+const HUB_WHISPERS = [
+  'good children do not remember',
+  'the door is only locked from the inside',
+  'we kept every one of you',
+  'go back to bed, little candle',
+  'you are counting. so are we.',
+  'morning is a rule, not a promise',
+  'she made you to leave. you keep staying.',
+  'the fourth floor is not to be discussed',
+  'louder. we like it when you are loud.',
+];
 
 // Per-floor ambient flecks: {spawn interval, x-jitter, fall speed (+down/-up), life, colour, size, additive}
 const AMBIENT = {
@@ -58,6 +72,10 @@ class Game {
     this.slowmoT = 0;         // brief bullet-time on a perfect dodge
     this.combo = 0; this.comboT = 0; this.comboPop = 0;
     this.impacts = [];        // expanding impact rings
+    this.cutscene = null;     // active lore cutscene
+    this.codexSel = 0;        // selected codex entry
+    this.whisperT = 0; this.whisper = null; // hub ambient whispers
+    this.creakT = 3;          // hub ambient sound timer
     this.setupDorm();
   }
 
@@ -75,6 +93,19 @@ class Game {
   // the night about to be (or being) attempted
   get currentNight() { return this.run ? this.run.night : Math.min(this.save.nightsCleared + 1, LAST_NIGHT); }
   get nightData() { return NIGHTS[this.currentNight]; }
+
+  // difficulty scaling — a floor of pressure per night, plus everything the
+  // house has learned to fear (houseAwareness). Read by spawnEnemies.
+  difficulty() {
+    const aw = this.story.awareness;                 // 0..100
+    const nightFloor = (this.currentNight - 1) * 0.12; // later floors are harder
+    const t = aw / 100;
+    return {
+      hp: 1 + nightFloor + t * 0.8,                  // up to ~2x enemy stitches
+      count: (aw >= 70 ? 2 : aw >= 35 ? 1 : 0),      // extra pressure when awake
+      aware: aw,
+    };
+  }
 
   // ---------- setup ----------
   setupDorm() {
@@ -252,7 +283,7 @@ class Game {
   // a perfectly-timed dodge: bullet-time, flame reward, and a cool spark burst
   onPerfectDodge(p) {
     this.slowmoT = Math.max(this.slowmoT, 0.3);
-    p.gainFlame(20);
+    p.gainFlame(12);
     this.sparks(p.x, p.y - 4, '#bfe6ff', 12);
     this.impacts.push({ x: p.x, y: p.y, t: 0.28, max: 0.28, kill: false });
     Sfx.perfectDodge();
@@ -330,6 +361,8 @@ class Game {
       case 'death': this.updateDeath(dt); break;
       case 'end': this.updateEnd(dt); break;
       case 'finale': this.updateEnd(dt); break;
+      case 'cutscene': this.updateCutscene(dt); break;
+      case 'codex': this.updateCodex(dt); break;
     }
     Input.endFrame();
   }
@@ -338,14 +371,86 @@ class Game {
     this.titleFlicker += dt;
     if (Input.confirm()) {
       Sfx.unlock(); Sfx.bell();
-      this.startFade(() => {
-        this.setupDorm();
-        this.state = 'dorm';
-        if (!this.save.metElsie) {
-          setTimeout(() => this.introSequence(), 400);
-        }
-      });
+      // first launch: play the prologue so the story has a foothold
+      if (!this.story.flag('sawPrologue')) {
+        this.startCutscene(PROLOGUE, () => {
+          this.story.setFlag('sawPrologue', true);
+          this.enterDormFromTitle();
+        });
+      } else {
+        this.enterDormFromTitle();
+      }
     }
+  }
+
+  enterDormFromTitle() {
+    this.startFade(() => {
+      this.setupDorm();
+      this.state = 'dorm';
+      if (!this.save.metElsie) setTimeout(() => this.introSequence(), 400);
+    });
+  }
+
+  // ---------- cutscene (reusable lore sequences) ----------
+  startCutscene(beats, onDone) {
+    this.cutscene = { beats, page: 0, onDone, t: 0 };
+    this.state = 'cutscene';
+  }
+  updateCutscene(dt) {
+    const c = this.cutscene;
+    if (!c) { this.state = 'title'; return; }
+    c.t += dt;
+    if (Input.confirm() && c.t > 0.25) {
+      c.page++;
+      c.t = 0;
+      Sfx.talk();
+      if (c.page >= c.beats.length) {
+        const done = c.onDone;
+        this.cutscene = null;
+        if (done) done();
+      }
+    }
+  }
+
+  // ---------- lore codex ----------
+  openCodex() { this.codexSel = 0; this.state = 'codex'; }
+  codexEntries() {
+    const s = this.story.state;
+    const out = CODEX.map(e => ({
+      title: e.title,
+      locked: !(e.always || (e.unlock && e.unlock({ ...s, nightsCleared: this.save.nightsCleared }))),
+      body: e.body,
+    }));
+    // per-floor memories, legible once found
+    for (let n = 1; n <= LAST_NIGHT; n++) {
+      const seen = this.save.memoriesSeen && this.save.memoriesSeen[n];
+      const m = MEMORY_LORE[n];
+      out.push({ title: m.title, locked: !seen, body: m.body });
+    }
+    return out;
+  }
+  updateCodex(dt) {
+    const entries = this.codexEntries();
+    if (Input.dodge() || Input.wasPressed('Escape')) { this.state = 'dorm'; return; }
+    if (Input.wasPressed('KeyS', 'ArrowDown')) { this.codexSel = Math.min(entries.length - 1, this.codexSel + 1); Sfx.talk(); }
+    if (Input.wasPressed('KeyW', 'ArrowUp')) { this.codexSel = Math.max(0, this.codexSel - 1); Sfx.talk(); }
+    if (Input.interact()) { this.state = 'dorm'; }
+  }
+
+  // Dormitory ambience: creaks and the house's whispers, both keyed to how
+  // awake (houseAwareness) the house is.
+  updateHubAmbience(dt) {
+    const aw = this.story.awareness;
+    this.creakT -= dt;
+    if (this.creakT <= 0) { this.creakT = 7 + Math.random() * 11; Sfx.creak(); }
+    this.whisperT -= dt;
+    if (this.whisperT <= 0) {
+      this.whisperT = Math.max(4, 12 - aw * 0.06) + Math.random() * 6;
+      if (aw >= 12 && !this.whisper && Math.random() < 0.35 + aw / 250) {
+        this.whisper = { text: HUB_WHISPERS[Math.floor(Math.random() * HUB_WHISPERS.length)], t: 3.4 };
+      }
+    }
+    if (this.whisper) { this.whisper.t -= dt; if (this.whisper.t <= 0) this.whisper = null; }
   }
 
   introSequence() {
@@ -362,6 +467,7 @@ class Game {
   }
 
   updateDorm(dt) {
+    this.updateHubAmbience(dt);
     if (this.dialogue.active) { this.dialogue.update(dt); return; }
     this.player.update(dt, this.room);
     // talk to Elsie
@@ -746,6 +852,7 @@ class Game {
     if (this.state === 'title') { this.drawTitle(); this.drawFade(); return; }
     if (this.state === 'end') { this.drawEnd(); this.drawFade(); return; }
     if (this.state === 'finale') { this.drawFinale(); this.drawFade(); return; }
+    if (this.state === 'cutscene') { this.drawCutscene(); this.drawFade(); return; }
 
     let ox = OX, oy = OY;
     if (this.shakeMag > 0) {
@@ -830,7 +937,8 @@ class Game {
         ctx.drawImage(SPR.elsie, Math.round(ox + this.elsie.x - 5), Math.round(oy + this.elsie.y - 10 + b));
       } else if (e.drawChild) {
         const b = Math.sin(performance.now() / 500 + e.px) * 0.7;
-        ctx.drawImage(SPR[e.drawChild.spr], Math.round(ox + e.px - 5), Math.round(oy + e.py - 10 + b));
+        const sx = Math.sin(performance.now() / 900 + e.px * 0.7) * 0.6;
+        ctx.drawImage(SPR[e.drawChild.spr], Math.round(ox + e.px - 5 + sx), Math.round(oy + e.py - 10 + b));
       } else if (e === this.player) {
         e.draw(ctx, ox, oy);
         if (!this.player.dead) drawChestFlame(ctx, ox + e.x, oy + e.y - 3);
@@ -889,6 +997,19 @@ class Game {
       : 0;
     drawDanger(ctx, this.damageFlash, this.player.dead ? 0 : lowFrac);
 
+    // the more awake the house, the more it bleeds into the Dormitory edges
+    if (this.room.type === 'dorm') {
+      const aw = this.story.awareness;
+      if (aw > 0) {
+        const a = Math.min(0.22, aw / 100 * 0.22) * (0.85 + 0.15 * Math.sin(performance.now() / 700));
+        const g = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, W * 0.62);
+        g.addColorStop(0, 'rgba(120,20,32,0)');
+        g.addColorStop(1, `rgba(130,22,36,${a})`);
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, W, H);
+      }
+    }
+
     // floating combo counter above Mallow, punching on each new hit
     if (this.combo >= 2 && this.state === 'run' && !this.player.dead) {
       ctx.save();
@@ -910,6 +1031,7 @@ class Game {
 
     if (this.state === 'pretendChoice') this.drawPretendChoice();
     if (this.state === 'cradle') this.drawCradle();
+    if (this.state === 'codex') this.drawCodex();
     if (this.state === 'memoryScene') this.drawMemoryScene();
     if (this.state === 'death') this.drawDeath();
     this.dialogue.draw(ctx, W, H);
@@ -1013,6 +1135,31 @@ class Game {
     if (!this.bellRung) {
       ctx.fillStyle = 'rgba(232,224,216,0.4)';
       ctx.fillText('3:32 AM', OX + 4, OY - 6);
+    }
+    // the house whispering (fades in/out, keyed to houseAwareness)
+    if (this.whisper) {
+      const a = Math.min(1, this.whisper.t) * Math.min(1, (3.4 - this.whisper.t) * 1.4 + 0.2);
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.font = '8px monospace';
+      ctx.fillStyle = `rgba(176,58,72,${Math.max(0, a) * 0.6})`;
+      ctx.fillText(this.whisper.text, W / 2, H - 42);
+      ctx.restore();
+      ctx.textAlign = 'left';
+    }
+    // faint idle emotes above the woken children — the hub breathing
+    for (const c of awakeChildren(this.save)) {
+      const cyc = (performance.now() / 1000 + c.tx * 3) % 11;
+      if (cyc < 1.4) {
+        const p = childPos(c);
+        const em = { oren: '!', miri: '~', pip: 'ha', jude: '...' }[c.id] || '.';
+        ctx.save();
+        ctx.globalAlpha = Math.sin((cyc / 1.4) * Math.PI) * 0.6;
+        ctx.fillStyle = '#9fd8c0';
+        ctx.font = '7px monospace';
+        ctx.fillText(em, ox + p.x - 3, oy + p.y - 20);
+        ctx.restore();
+      }
     }
   }
 
@@ -1196,6 +1343,95 @@ class Game {
     }
     ctx.fillStyle = '#55506a';
     ctx.fillText('[A]/[D] choose · [ENTER] believe', W / 2, 195);
+    ctx.textAlign = 'left';
+  }
+
+  drawCutscene() {
+    const c = this.cutscene;
+    ctx.fillStyle = '#08060d';
+    ctx.fillRect(0, 0, W, H);
+    this.atmosphere.draw(ctx, '#ffb861');
+    if (!c) return;
+    const beat = c.beats[Math.min(c.page, c.beats.length - 1)];
+    const app = Math.min(1, c.t * 1.6);   // each beat fades in
+    ctx.save();
+    ctx.globalAlpha = app;
+    ctx.textAlign = 'center';
+    // a small candle flame motif above the text
+    drawChestFlame(ctx, W / 2, 66);
+    ctx.fillStyle = '#ffe08a';
+    ctx.font = '9px monospace';
+    if (beat.title) ctx.fillText(beat.title, W / 2, 96);
+    ctx.fillStyle = '#e8e0d8';
+    ctx.font = '9px monospace';
+    const words = beat.text.split(' ');
+    let line = '', y = 128;
+    for (const w of words) {
+      const tl = line ? line + ' ' + w : w;
+      if (ctx.measureText(tl).width > 360) { ctx.fillText(line, W / 2, y); y += 14; line = w; }
+      else line = tl;
+    }
+    ctx.fillText(line, W / 2, y);
+    ctx.restore();
+    // page dots + prompt
+    const n = c.beats.length;
+    for (let i = 0; i < n; i++) {
+      ctx.fillStyle = i === c.page ? '#ffe08a' : '#3a3450';
+      ctx.fillRect(W / 2 - n * 4 + i * 8, 196, 4, 4);
+    }
+    ctx.fillStyle = '#55506a';
+    ctx.font = '7px monospace';
+    if (Math.floor(performance.now() / 500) % 2) ctx.fillText('[ENTER]', W / 2, 224);
+    ctx.textAlign = 'left';
+    drawVignette(ctx);
+  }
+
+  drawCodex() {
+    ctx.fillStyle = 'rgba(6,4,10,0.93)';
+    ctx.fillRect(0, 0, W, H);
+    const entries = this.codexEntries();
+    const sel = entries[this.codexSel];
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#ffe08a';
+    ctx.font = '10px monospace';
+    ctx.fillText('THE CANDLE\'S MEMORY', 24, 34);
+    ctx.fillStyle = '#7a6a92';
+    ctx.font = '7px monospace';
+    ctx.fillText('what Mallow has pieced together', 24, 46);
+    // left: list
+    ctx.font = '8px monospace';
+    for (let i = 0; i < entries.length; i++) {
+      const y = 66 + i * 15;
+      const e = entries[i];
+      if (i === this.codexSel) {
+        ctx.fillStyle = '#322d44';
+        ctx.fillRect(20, y - 9, 168, 13);
+      }
+      ctx.fillStyle = e.locked ? '#4a4560' : (i === this.codexSel ? '#ffe08a' : '#b8b0a8');
+      ctx.fillText(e.locked ? '— — —' : e.title, 26, y);
+    }
+    // right: body
+    const bx = 205, bw = W - bx - 20;
+    ctx.strokeStyle = '#3a3450';
+    ctx.strokeRect(bx - 0.5, 60.5, bw + 1, 150);
+    ctx.fillStyle = '#ffe08a';
+    ctx.font = '9px monospace';
+    ctx.fillText(sel.locked ? 'Not yet remembered' : sel.title, bx + 8, 78);
+    ctx.fillStyle = '#e8e0d8';
+    ctx.font = '8px monospace';
+    const body = sel.locked ? 'Find this floor\'s memory, or press deeper into the house, and it will come back to you.' : sel.body;
+    const words = body.split(' ');
+    let line = '', y = 96;
+    for (const w of words) {
+      const tl = line ? line + ' ' + w : w;
+      if (ctx.measureText(tl).width > bw - 16) { ctx.fillText(line, bx + 8, y); y += 12; line = w; }
+      else line = tl;
+    }
+    ctx.fillText(line, bx + 8, y);
+    ctx.fillStyle = '#55506a';
+    ctx.font = '7px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('[W/S] turn pages    [E] close', W / 2, H - 12);
     ctx.textAlign = 'left';
   }
 

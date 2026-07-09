@@ -277,6 +277,19 @@ export function spawnEnemies(room, game) {
     else if (kind === 'laundress') out.push(new Laundress(game, p.x, p.y));
     else if (kind === 'mercy') out.push(new Mercy(game, p.x, p.y));
   }
+  // difficulty: tougher enemies, and extra bodies once the house is awake
+  const diff = game.difficulty ? game.difficulty() : { hp: 1, count: 0 };
+  for (const e of out) {
+    if (!e.isBoss) { e.hp = Math.max(1, Math.round(e.hp * diff.hp)); e.maxHp = e.hp; }
+  }
+  if (room.type === 'combat' && diff.count > 0) {
+    for (let i = 0; i < diff.count; i++) {
+      const x = (4 + Math.random() * 20) * TS, y = (3 + Math.random() * 8) * TS;
+      const extra = new ButtonMouse(game, x, y);
+      extra.hp = Math.max(1, Math.round(extra.hp * diff.hp));
+      out.push(extra);
+    }
+  }
   return out;
 }
 
