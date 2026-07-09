@@ -53,6 +53,7 @@ class Game {
     this.titleFlicker = 0;
     this.atmosphere = new Atmosphere();
     this.damageFlash = 0;
+    this.ambT = 0;            // ambient-fleck spawn timer
     this.setupDorm();
   }
 
@@ -741,12 +742,16 @@ class Game {
       }
     }
     ents.sort((a, b) => a.y - b.y);
-    // grounding shadows, drawn first so nothing sits on top of its own shade
+    // grounding shadows (and attack telegraphs), drawn first so nothing sits on
+    // top of its own shade or ring
     for (const e of ents) {
       if (e.drawElsie) drawShadow(ctx, ox + this.elsie.x, oy + this.elsie.y, 9);
       else if (e.drawChild) drawShadow(ctx, ox + e.px, oy + e.py, 9);
       else if (e === this.player) { if (!this.player.dead) drawShadow(ctx, ox + e.x, oy + e.y, 9); }
-      else drawShadow(ctx, ox + e.x, oy + e.y, e.w || 10);
+      else {
+        drawShadow(ctx, ox + e.x, oy + e.y, e.w || 10);
+        if (e.drawTelegraph) e.drawTelegraph(ctx, ox, oy);
+      }
     }
     for (const e of ents) {
       if (e.drawElsie) {
@@ -1214,11 +1219,13 @@ class Game {
       cx = OX + this.player.x; cy = OY + this.player.y;
     }
     const holeR = (W * 0.7) * (1 - f);
-    const coreA = Math.max(0, (f - 0.75) / 0.25);   // centre only blacks out at the very end
+    // both stops scale with f so the overlay eases from fully transparent at the
+    // start of the fade to fully black at the end (no edge "pop" on frame one)
+    const coreA = Math.max(0, (f - 0.75) / 0.25) * f;   // centre only blacks out at the very end
     ctx.save();
     const g = ctx.createRadialGradient(cx, cy, Math.max(0, holeR * 0.55), cx, cy, holeR + 60);
     g.addColorStop(0, `rgba(5,3,8,${coreA})`);
-    g.addColorStop(1, 'rgba(5,3,8,1)');
+    g.addColorStop(1, `rgba(5,3,8,${f})`);
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
     if (holeR > 4 && f < 0.98) {

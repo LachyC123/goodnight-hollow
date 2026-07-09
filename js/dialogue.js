@@ -88,14 +88,16 @@ export class Dialogue {
     let textX = bx + 10;
     if (portrait) {
       const pb = 46, pxx = bx + 6, pyy = by + (bh - pb) / 2;
+      ctx.save();
       ctx.fillStyle = 'rgba(6,4,10,0.9)';
       this._panel(ctx, pxx, pyy, pb, pb, 4); ctx.fill();
       ctx.strokeStyle = '#6a5f82';
       this._panel(ctx, pxx + 0.5, pyy + 0.5, pb - 1, pb - 1, 4); ctx.stroke();
       const sc = Math.min((pb - 8) / portrait.width, (pb - 8) / portrait.height);
       const dw = portrait.width * sc, dh = portrait.height * sc;
-      ctx.imageSmoothingEnabled = false;
+      ctx.imageSmoothingEnabled = false;   // scoped by save/restore below
       ctx.drawImage(portrait, pxx + (pb - dw) / 2, pyy + (pb - dh) / 2, dw, dh);
+      ctx.restore();
       textX = pxx + pb + 10;
     }
 
