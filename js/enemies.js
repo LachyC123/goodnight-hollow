@@ -3,6 +3,9 @@ import { SPR } from './sprites.js';
 import { Sfx } from './audio.js';
 import { moveEntity, overlap, dist, TS, COLS, ROWS } from './world.js';
 
+// states during which an enemy is winding up to strike — telegraphed on the floor
+const TELEGRAPH = new Set(['windup', 'charge', 'slam']);
+
 class Enemy {
   constructor(game, x, y) {
     this.game = game;
@@ -37,6 +40,19 @@ class Enemy {
   }
   update(dt, room, player) {}
   drawSprite(ctx, ox, oy, spr) {
+    // telegraph: a throbbing red ring on the floor while winding up to strike
+    if (TELEGRAPH.has(this.state)) {
+      const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 90);
+      const rr = (this.isBoss ? 20 : 12) + pulse * 4;
+      ctx.save();
+      ctx.globalAlpha = 0.22 + 0.4 * pulse;
+      ctx.strokeStyle = '#ff5a44';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.ellipse(ox + this.x, oy + this.y + 3, rr, rr * 0.5, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
     const b = this.bob ? Math.sin(performance.now() / 320 + this.bobPhase) * 1.1 : 0;
     const px = Math.round(ox + this.x - spr.width / 2);
     const py = Math.round(oy + this.y - spr.height + 4 + b);
