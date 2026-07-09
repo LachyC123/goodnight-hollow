@@ -16,6 +16,10 @@ import { StoryManager } from './story.js';
 import { DialogueManager, ELSIE_FIRST_WAKE, nannyIntroLines, NANNY_DEFEAT_LINES } from './storyDialogue.js';
 import { HUB_OBJECTS, hubObjectPos } from './hub.js';
 import { awakeChildren, childPos } from './children.js';
+import {
+  Atmosphere, fxFor, drawShadow, drawLightPools, drawChestFlame,
+  drawVignette, drawGrade, drawGrain, drawDanger,
+} from './fx.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -37,6 +41,8 @@ class Game {
     this.shakeMag = 0; this.shakeT = 0;
     this.fade = 0; this.fadeDir = 0; this.fadeCb = null;
     this.titleFlicker = 0;
+    this.atmosphere = new Atmosphere();
+    this.damageFlash = 0;
     this.setupDorm();
   }
 
@@ -208,6 +214,8 @@ class Game {
     }
     this.shakeT = Math.max(0, this.shakeT - dt);
     if (this.shakeT <= 0) this.shakeMag = 0;
+    this.damageFlash = Math.max(0, this.damageFlash - dt);
+    this.atmosphere.update(dt);
     for (const p of this.particles) {
       p.x += p.vx * dt; p.y += p.vy * dt; p.t -= dt;
     }
@@ -682,11 +690,21 @@ class Game {
       }
     }
     ents.sort((a, b) => a.y - b.y);
+    // grounding shadows, drawn first so nothing sits on top of its own shade
+    for (const e of ents) {
+      if (e.drawElsie) drawShadow(ctx, ox + this.elsie.x, oy + this.elsie.y, 9);
+      else if (e.drawChild) drawShadow(ctx, ox + e.px, oy + e.py, 9);
+      else if (e === this.player) { if (!this.player.dead) drawShadow(ctx, ox + e.x, oy + e.y, 9); }
+      else drawShadow(ctx, ox + e.x, oy + e.y, e.w || 10);
+    }
     for (const e of ents) {
       if (e.drawElsie) {
         ctx.drawImage(SPR.elsie, Math.round(ox + this.elsie.x - 5), Math.round(oy + this.elsie.y - 10));
       } else if (e.drawChild) {
         ctx.drawImage(SPR[e.drawChild.spr], Math.round(ox + e.px - 5), Math.round(oy + e.py - 10));
+      } else if (e === this.player) {
+        e.draw(ctx, ox, oy);
+        if (!this.player.dead) drawChestFlame(ctx, ox + e.x, oy + e.y - 3);
       } else e.draw(ctx, ox, oy);
     }
 
@@ -698,8 +716,22 @@ class Game {
     }
     ctx.globalAlpha = 1;
 
-    // candlelight vignette
+    // candlelight vignette (darkness), then warm candle light punched back through it
     this.drawLight(ox, oy);
+    drawLightPools(ctx, this.room, ox, oy);
+
+    // drifting embers / dust, tinted for the current floor
+    const fx = fxFor(this.room.type === 'dorm' ? 1 : this.currentNight);
+    this.atmosphere.draw(ctx, fx.mote);
+
+    // cinematic post-processing: colour grade, edge vignette, film grain, danger
+    drawGrade(ctx, fx.grade);
+    drawVignette(ctx);
+    drawGrain(ctx, 0.045);
+    const lowFrac = this.player.maxStitches
+      ? Math.max(0, 1 - this.player.stitches / (this.player.maxStitches * 0.34))
+      : 0;
+    drawDanger(ctx, this.damageFlash, this.player.dead ? 0 : lowFrac);
 
     // dorm extras
     if (this.state === 'dorm' || (this.state !== 'run' && this.room.type === 'dorm')) this.drawDormOverlay(ox, oy);
@@ -863,7 +895,13 @@ class Game {
 
   drawTitle() {
     const t = this.titleFlicker;
+    drawVignette(ctx);
+    // drifting embers behind the title
+    this.atmosphere.draw(ctx, '#ffb861');
     ctx.textAlign = 'center';
+    // warm glow behind Mallow, from the candle in her chest
+    drawChestFlame(ctx, W / 2, 104);
+    drawChestFlame(ctx, W / 2, 104);
     // candle
     ctx.drawImage(SPR.mallow, 0, 0, 12, 14, W / 2 - 24, 70, 48, 56);
     const flick = 0.85 + Math.sin(t * 7) * 0.1 + Math.sin(t * 23) * 0.05;
