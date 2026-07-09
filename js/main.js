@@ -55,6 +55,7 @@ class Game {
     this.damageFlash = 0;
     this.ambT = 0;            // ambient-fleck spawn timer
     this.hitStop = 0;         // freeze-frames on impact
+    this.slowmoT = 0;         // brief bullet-time on a perfect dodge
     this.combo = 0; this.comboT = 0; this.comboPop = 0;
     this.impacts = [];        // expanding impact rings
     this.setupDorm();
@@ -246,6 +247,16 @@ class Game {
     this.combo++;
     this.comboT = 1.1;
     this.comboPop = 0.16;
+    this.story.onCombo(this.combo);
+  }
+  // a perfectly-timed dodge: bullet-time, flame reward, and a cool spark burst
+  onPerfectDodge(p) {
+    this.slowmoT = Math.max(this.slowmoT, 0.3);
+    p.gainFlame(20);
+    this.sparks(p.x, p.y - 4, '#bfe6ff', 12);
+    this.impacts.push({ x: p.x, y: p.y, t: 0.28, max: 0.28, kill: false });
+    Sfx.perfectDodge();
+    this.story.onPerfectDodge();
   }
   startFade(cb) { this.fadeDir = 1; this.fadeCb = cb; }
 
@@ -254,6 +265,8 @@ class Game {
     // hitstop: hold the whole frame for a few ms so impacts land. Input isn't
     // flushed (Input.endFrame runs at the end), so presses are buffered.
     if (this.hitStop > 0) { this.hitStop = Math.max(0, this.hitStop - dt); return; }
+    // perfect-dodge bullet-time: slow the whole simulation for a beat
+    if (this.slowmoT > 0) { this.slowmoT -= dt; dt *= 0.4; }
     // fade transitions
     if (this.fadeDir !== 0) {
       this.fade += this.fadeDir * dt * 2.5;
@@ -579,7 +592,7 @@ class Game {
   updateDeath(dt) {
     if (Input.confirm() && this.fadeDir === 0) {
       this.save.nights++;
-      this.story.endRun('death'); // RunSummary — Elsie reacts when spoken to
+      this.story.endRun('death', null, { damageTaken: this.run ? this.run.damageTaken : 0 }); // RunSummary — Elsie reacts when spoken to
       this.persist();
       this.startFade(() => {
         this.setupDorm();
@@ -595,7 +608,7 @@ class Game {
     const night = this.currentNight;
     const data = this.nightData;
     const run = this.run; // stats outlive setupDorm's reset
-    this.story.endRun('victory'); // RunSummary — Elsie reacts when spoken to
+    this.story.endRun('victory', null, { damageTaken: run ? run.damageTaken : 0 }); // RunSummary — Elsie reacts when spoken to
     this.save.nights++;
     this.save.wonOnce = true;
     this.save.nightsCleared = Math.max(this.save.nightsCleared, night);

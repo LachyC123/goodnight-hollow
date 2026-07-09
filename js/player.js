@@ -27,6 +27,8 @@ export class Player {
     this.ghosts = [];        // dodge afterimages
     this.lungeT = 0;         // forward step-in on attack
     this.lvx = 0; this.lvy = 0;
+    this.flourish = false;   // empowered swing while a combo is hot
+    this.dodgeRewarded = false;
   }
 
   get keepsakes() { return this.game.save.keepsakes || {}; }
@@ -35,23 +37,30 @@ export class Player {
   get attacking() { return this.attackT > 0; }
 
   attackBox() {
-    const r = 15;
+    const r = this.flourish ? 18 : 15;                 // the flourish reaches wider
+    const long = this.flourish ? 30 : 24, wide = this.flourish ? 24 : 18;
     return {
       x: this.x + this.facing.x * r,
       y: this.y + this.facing.y * r,
-      w: this.facing.x !== 0 ? 18 : 24,
-      h: this.facing.y !== 0 ? 18 : 24,
+      w: this.facing.x !== 0 ? wide : long,
+      h: this.facing.y !== 0 ? wide : long,
     };
   }
 
   damage() {
     let d = 1 * this.mods.damageMult;
     if (this.stitches <= this.maxStitches / 2) d *= this.mods.damageMultLowHp;
+    if (this.flourish) d *= 2.2;                        // combo finisher hits hard
     return d;
   }
 
   hurt(amount, fromX, fromY) {
-    if (this.iframes > 0 || this.dead || this.dodgeT > 0) return;
+    if (this.dead || this.iframes > 0) return;
+    // a hit avoided mid-dodge is a *perfect dodge* — rewarded once per roll
+    if (this.dodgeT > 0) {
+      if (!this.dodgeRewarded) { this.dodgeRewarded = true; this.game.onPerfectDodge(this); }
+      return;
+    }
     this.stitches -= amount;
     if (this.game.run) this.game.run.damageTaken += amount;
     this.iframes = 1.0;
@@ -129,16 +138,20 @@ export class Player {
         this.dodgeT = 0.18;
         this.dodgeCd = 0.6 * this.mods.dodgeCdMult;
         this.dvx = dx * 250; this.dvy = dy * 250;
+        this.dodgeRewarded = false;
         Sfx.dodge();
       }
       if (Input.attack() && this.attackCd <= 0) {
         this.attackT = 0.12;
         this.attackCd = 0.32 * this.mods.attackCdMult;
         this.hitThisSwing = new Set();
+        // a hot combo (>=5) empowers the swing into a wide, heavy flourish
+        this.flourish = this.game.combo >= 5;
         // step into the swing — commitment and weight
-        this.lungeT = 0.11;
-        this.lvx = this.facing.x * 90; this.lvy = this.facing.y * 90;
-        Sfx.swing();
+        this.lungeT = this.flourish ? 0.14 : 0.11;
+        this.lvx = this.facing.x * (this.flourish ? 120 : 90);
+        this.lvy = this.facing.y * (this.flourish ? 120 : 90);
+        if (this.flourish) { this.game.shake(3, 0.12); Sfx.flourish(); } else Sfx.swing();
       }
       // Candleflame burst (special)
       if (Input.wasPressed('KeyL','KeyC') && this.flame >= 50) {
@@ -193,23 +206,27 @@ export class Player {
         this.game.puff(this.x, this.y, '#e8e0d8');
       }
     }
-    // needle swing + bright slash arc
+    // needle swing + bright slash arc (wider, hotter, longer for a flourish)
     if (this.attackT > 0) {
+      const fl = this.flourish;
       const prog = 1 - this.attackT / 0.12;               // 0..1 through the swing
       const base = Math.atan2(this.facing.y, this.facing.x);
-      const swing = base - 0.7 + 1.4 * prog;              // sweep across the arc
-      const r = 15;
+      const sweep = fl ? 2.0 : 1.4;
+      const swing = base - sweep / 2 + sweep * prog;       // sweep across the arc
+      const r = fl ? 20 : 15;
+      const tail = fl ? 8 : 5;
+      const col = fl ? '255,190,110' : '255,236,180';
       ctx.save();
       ctx.translate(ox + this.x, oy + this.y - 2);
       ctx.globalCompositeOperation = 'lighter';
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < tail; i++) {
         const a = swing - i * 0.15;
-        const alpha = (1 - prog) * (1 - i / 5) * 0.55;
+        const alpha = (1 - prog) * (1 - i / tail) * (fl ? 0.7 : 0.55);
         if (alpha <= 0) continue;
-        ctx.strokeStyle = `rgba(255,236,180,${alpha})`;
-        ctx.lineWidth = 2.2 - i * 0.3;
+        ctx.strokeStyle = `rgba(${col},${alpha})`;
+        ctx.lineWidth = (fl ? 3 : 2.2) - i * 0.3;
         ctx.beginPath();
-        ctx.arc(0, 0, r, a - 0.06, a + 0.06);
+        ctx.arc(0, 0, r, a - (fl ? 0.09 : 0.06), a + (fl ? 0.09 : 0.06));
         ctx.stroke();
       }
       ctx.globalCompositeOperation = 'source-over';

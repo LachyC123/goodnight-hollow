@@ -82,6 +82,21 @@ export const CHILDREN = [
         effects: { child: 'oren', bondChange: 1 },
       },
       {
+        id: 'oren_ferocious',
+        speaker: 'Oren',
+        priority: 55,
+        repeatable: true,
+        condition: ({ run }) => run && run.ferocious,
+        lines: ({ run }) => [
+          ...[`${run.biggestCombo} in a row. I felt every one of them from up here.`,
+            'THAT\'S it. That\'s what I keep telling Elsie.',
+            'The house is bigger than us. So you hit it until it\'s smaller.',
+            'You\'re not a soft little rabbit. You\'ve got teeth.',
+            'Don\'t let her make you feel bad about the teeth.'].map(oren),
+        ],
+        effects: { child: 'oren', bondChange: 1, trustChange: 1 },
+      },
+      {
         id: 'oren_death_reaction',
         speaker: 'Oren',
         priority: 50,
