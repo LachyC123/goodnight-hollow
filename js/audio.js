@@ -39,10 +39,23 @@ function noise(dur, vol = 0.06) {
 
 export const Sfx = {
   unlock() { ac(); },
-  swing() { tone(220, 0.08, 'sawtooth', 0.05, -120); },
-  hit() { noise(0.08, 0.08); tone(140, 0.08, 'square', 0.06, -60); },
+  swing() { noise(0.05, 0.03); tone(300, 0.07, 'sawtooth', 0.045, -190); },
+  // punchier connect: a noise crack + a body tone that pitches up with the combo,
+  // and a low thump for weight.
+  hit(combo = 0) {
+    const p = Math.min(12, combo);
+    noise(0.06, 0.10);
+    tone(175 + p * 16, 0.07, 'square', 0.07, -80);
+    tone(90, 0.05, 'sine', 0.06, -24);
+  },
   hurt() { tone(110, 0.25, 'sawtooth', 0.1, -70); noise(0.15, 0.06); },
   dodge() { tone(500, 0.1, 'sine', 0.05, 250); },
+  // a well-timed dodge: a bright rising chime
+  perfectDodge() { tone(720, 0.14, 'sine', 0.07, 520); tone(1080, 0.18, 'sine', 0.05, 260); },
+  // the empowered flourish swing: a heavier whoosh with a bell edge
+  flourish() { noise(0.07, 0.05); tone(360, 0.12, 'sawtooth', 0.06, -240); tone(660, 0.14, 'sine', 0.05, -60); },
+  // a needle-parry: a bright metallic ting
+  parry() { tone(1400, 0.06, 'square', 0.05, -200); tone(2100, 0.09, 'sine', 0.05, 400); noise(0.03, 0.03); },
   enemyDie() { noise(0.15, 0.07); tone(90, 0.2, 'triangle', 0.08, -50); },
   pickup() { tone(660, 0.1, 'sine', 0.06, 220); tone(880, 0.12, 'sine', 0.05, 110); },
   doorOpen() { tone(160, 0.3, 'triangle', 0.07, 60); },

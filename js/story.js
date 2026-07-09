@@ -70,6 +70,11 @@ export function freshRunTemp(floor = null) {
     currentRunBossDefeated: false,
     currentRunDeathCause: null,
     currentRunResult: null, // 'death' | 'victory' | 'return'
+    // combat-shape of the run — how Mallow fought, for reactive dialogue
+    currentRunBiggestCombo: 0,
+    currentRunPerfectDodges: 0,
+    currentRunParries: 0,
+    currentRunDamageTaken: 0,
   };
 }
 
@@ -108,6 +113,9 @@ export class StoryManager {
 
   onRoomCleared() { this.run.currentRunRoomsCleared++; }
   onDollSeen(n = 1) { this.run.cryingDollsSeen += n; }
+  onCombo(n) { if (n > this.run.currentRunBiggestCombo) this.run.currentRunBiggestCombo = n; }
+  onPerfectDodge() { this.run.currentRunPerfectDodges++; }
+  onParry() { this.run.currentRunParries++; }
 
   onDollKilled() {
     this.run.currentRunCryingDollsKilled++;
@@ -140,10 +148,11 @@ export class StoryManager {
   }
 
   // result: 'death' | 'victory' | 'return'
-  endRun(result, deathCause = null) {
+  endRun(result, deathCause = null, combat = {}) {
     const r = this.run;
     r.currentRunResult = result;
     r.currentRunDeathCause = deathCause;
+    if (typeof combat.damageTaken === 'number') r.currentRunDamageTaken = combat.damageTaken;
     r.currentRunCryingDollsSpared = Math.max(0, r.cryingDollsSeen - r.currentRunCryingDollsKilled);
     if (r.currentRunCryingDollsSpared > 0) {
       this.state.totalCryingDollsSpared += r.currentRunCryingDollsSpared;
@@ -222,6 +231,15 @@ export function buildRunSummary(run, state) {
     tookBargain: run.currentRunAcceptedBargain,
     bossReached: run.currentRunBossReached,
     bossDefeated: run.currentRunBossDefeated,
+    // how Mallow fought — surfaced to reactive dialogue
+    biggestCombo: run.currentRunBiggestCombo,
+    perfectDodges: run.currentRunPerfectDodges,
+    parries: run.currentRunParries,
+    ferocious: run.currentRunBiggestCombo >= 6,
+    graceful: run.currentRunPerfectDodges >= 3,
+    deflector: run.currentRunParries >= 3,
+    flawless: run.currentRunDamageTaken === 0 &&
+      (run.currentRunBossDefeated || run.currentRunRoomsCleared >= 4),
     reacted: false, // set true once the Dormitory reaction has played
   };
 }

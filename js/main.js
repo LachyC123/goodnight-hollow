@@ -54,6 +54,10 @@ class Game {
     this.atmosphere = new Atmosphere();
     this.damageFlash = 0;
     this.ambT = 0;            // ambient-fleck spawn timer
+    this.hitStop = 0;         // freeze-frames on impact
+    this.slowmoT = 0;         // brief bullet-time on a perfect dodge
+    this.combo = 0; this.comboT = 0; this.comboPop = 0;
+    this.impacts = [];        // expanding impact rings
     this.setupDorm();
   }
 
@@ -235,10 +239,58 @@ class Game {
       });
     }
   }
+  // the full impact package: hitstop + shake + expanding ring + combo tick
+  impact(x, y, kill = false) {
+    this.hitStop = Math.max(this.hitStop, kill ? 0.09 : 0.05);
+    this.shake(kill ? 5.5 : 2.8, kill ? 0.28 : 0.14);
+    this.impacts.push({ x, y, t: kill ? 0.3 : 0.2, max: kill ? 0.3 : 0.2, kill });
+    this.combo++;
+    this.comboT = 1.1;
+    this.comboPop = 0.16;
+    this.story.onCombo(this.combo);
+  }
+  // a perfectly-timed dodge: bullet-time, flame reward, and a cool spark burst
+  onPerfectDodge(p) {
+    this.slowmoT = Math.max(this.slowmoT, 0.3);
+    p.gainFlame(20);
+    this.sparks(p.x, p.y - 4, '#bfe6ff', 12);
+    this.impacts.push({ x: p.x, y: p.y, t: 0.28, max: 0.28, kill: false });
+    Sfx.perfectDodge();
+    this.story.onPerfectDodge();
+  }
+  // parry: a swing that catches a projectile sends it back, now friendly
+  parryProjectile(p) {
+    let best = null, bd = Infinity;
+    for (const e of this.enemies) {
+      if (e.dead) continue;
+      const d = dist(e, this.player);
+      if (d < bd) { bd = d; best = e; }
+    }
+    const speed = (Math.hypot(p.vx, p.vy) || 130) * 1.4;
+    if (best) {
+      const dx = best.x - p.x, dy = best.y - p.y, l = Math.hypot(dx, dy) || 1;
+      p.vx = (dx / l) * speed; p.vy = (dy / l) * speed;
+    } else { p.vx = -p.vx * 1.4; p.vy = -p.vy * 1.4; }
+    p.friendly = true;
+    p.color = '#ffe08a';
+    p.t = Math.max(p.t, 1.6);
+    this.player.gainFlame(10);
+    this.sparks(p.x, p.y, '#ffe08a', 8);
+    this.impacts.push({ x: p.x, y: p.y, t: 0.22, max: 0.22, kill: false });
+    this.hitStop = Math.max(this.hitStop, 0.05);
+    this.shake(2.6, 0.12);
+    Sfx.parry();
+    this.story.onParry();
+  }
   startFade(cb) { this.fadeDir = 1; this.fadeCb = cb; }
 
   // ---------- update ----------
   update(dt) {
+    // hitstop: hold the whole frame for a few ms so impacts land. Input isn't
+    // flushed (Input.endFrame runs at the end), so presses are buffered.
+    if (this.hitStop > 0) { this.hitStop = Math.max(0, this.hitStop - dt); return; }
+    // perfect-dodge bullet-time: slow the whole simulation for a beat
+    if (this.slowmoT > 0) { this.slowmoT -= dt; dt *= 0.4; }
     // fade transitions
     if (this.fadeDir !== 0) {
       this.fade += this.fadeDir * dt * 2.5;
@@ -252,6 +304,10 @@ class Game {
     this.shakeT = Math.max(0, this.shakeT - dt);
     if (this.shakeT <= 0) this.shakeMag = 0;
     this.damageFlash = Math.max(0, this.damageFlash - dt);
+    this.comboPop = Math.max(0, this.comboPop - dt);
+    if (this.comboT > 0) { this.comboT -= dt; if (this.comboT <= 0) this.combo = 0; }
+    for (const im of this.impacts) im.t -= dt;
+    if (this.impacts.length) this.impacts = this.impacts.filter(im => im.t > 0);
     this.atmosphere.update(dt);
     if (this.state === 'run' || this.state === 'dorm') this.ambientEmit(dt);
     for (const p of this.particles) {
@@ -417,13 +473,21 @@ class Game {
     this.player.update(dt, this.room);
     if (this.player.dead) return;
 
-    // enemies
-    for (const e of this.enemies) if (!e.dead) e.update(dt, this.room, this.player);
-    // projectiles
+    // enemies (a hit briefly stuns non-bosses — they freeze and flash mid-flinch)
+    for (const e of this.enemies) {
+      if (e.dead) continue;
+      if (e.stun > 0) { e.stun -= dt; e.flash = Math.max(0, e.flash - dt); }
+      else e.update(dt, this.room, this.player);
+    }
+    // projectiles — friendly (parried) ones hunt enemies; the rest hunt Mallow
     for (const p of this.projectiles) {
       p.x += p.vx * dt; p.y += p.vy * dt; p.t -= dt;
-      if (solidAt(this.room, p.x, p.y)) p.t = 0;
-      else if (dist(p, this.player) < (p.r || 2) + 4) {
+      if (solidAt(this.room, p.x, p.y)) { p.t = 0; continue; }
+      if (p.friendly) {
+        for (const e of this.enemies) {
+          if (!e.dead && dist(p, e) < (p.r || 2) + (e.w || 8) / 2) { e.hit(1, p); p.t = 0; break; }
+        }
+      } else if (dist(p, this.player) < (p.r || 2) + 4) {
         p.t = 0;
         this.player.hurt(1, p.x - p.vx, p.y - p.vy);
       }
@@ -436,6 +500,13 @@ class Game {
         if (!e.dead && !this.player.hitThisSwing.has(e) && overlap(box, e)) {
           this.player.hitThisSwing.add(e);
           e.hit(this.player.damage(), this.player);
+        }
+      }
+      // catch enemy projectiles in the swing and send them back
+      for (const p of this.projectiles) {
+        const r = p.r || 2;
+        if (!p.friendly && overlap(box, { x: p.x, y: p.y, w: r * 2, h: r * 2 })) {
+          this.parryProjectile(p);
         }
       }
     }
@@ -556,7 +627,7 @@ class Game {
   updateDeath(dt) {
     if (Input.confirm() && this.fadeDir === 0) {
       this.save.nights++;
-      this.story.endRun('death'); // RunSummary — Elsie reacts when spoken to
+      this.story.endRun('death', null, { damageTaken: this.run ? this.run.damageTaken : 0 }); // RunSummary — Elsie reacts when spoken to
       this.persist();
       this.startFade(() => {
         this.setupDorm();
@@ -572,7 +643,7 @@ class Game {
     const night = this.currentNight;
     const data = this.nightData;
     const run = this.run; // stats outlive setupDorm's reset
-    this.story.endRun('victory'); // RunSummary — Elsie reacts when spoken to
+    this.story.endRun('victory', null, { damageTaken: run ? run.damageTaken : 0 }); // RunSummary — Elsie reacts when spoken to
     this.save.nights++;
     this.save.wonOnce = true;
     this.save.nightsCleared = Math.max(this.save.nightsCleared, night);
@@ -777,6 +848,22 @@ class Game {
     }
     ctx.globalAlpha = 1;
 
+    // impact rings — a quick expanding flash at each contact point
+    for (const im of this.impacts) {
+      const p = 1 - im.t / im.max;                 // 0..1
+      const r = 3 + p * (im.kill ? 26 : 15);
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = (1 - p) * 0.85;
+      ctx.strokeStyle = im.kill ? '#ffd6a0' : '#ffffff';
+      ctx.lineWidth = im.kill ? 2 : 1.5;
+      ctx.beginPath();
+      ctx.arc(ox + im.x, oy + im.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+
     // candlelight vignette (darkness), then warm candle light + live flames
     this.drawLight(ox, oy);
     drawLightPools(ctx, this.room, ox, oy);
@@ -801,6 +888,20 @@ class Game {
       ? Math.max(0, 1 - this.player.stitches / (this.player.maxStitches * 0.34))
       : 0;
     drawDanger(ctx, this.damageFlash, this.player.dead ? 0 : lowFrac);
+
+    // floating combo counter above Mallow, punching on each new hit
+    if (this.combo >= 2 && this.state === 'run' && !this.player.dead) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, this.comboT * 2.5);
+      ctx.translate(ox + this.player.x, oy + this.player.y - 18);
+      ctx.scale(1 + this.comboPop * 2.2, 1 + this.comboPop * 2.2);
+      ctx.font = '9px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = this.combo >= 8 ? '#ff6b35' : this.combo >= 5 ? '#ffb347' : '#ffe08a';
+      ctx.fillText(`×${this.combo}`, 0, 0);
+      ctx.textAlign = 'left';
+      ctx.restore();
+    }
 
     // dorm extras
     if (this.state === 'dorm' || (this.state !== 'run' && this.room.type === 'dorm')) this.drawDormOverlay(ox, oy);
