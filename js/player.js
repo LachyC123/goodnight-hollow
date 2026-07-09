@@ -52,6 +52,7 @@ export class Player {
     this.iframes = 1.0;
     Sfx.hurt();
     this.game.shake(4, 0.25);
+    this.game.damageFlash = 0.2;
     const dx = this.x - fromX, dy = this.y - fromY;
     const l = Math.hypot(dx, dy) || 1;
     this.kbx = (dx / l) * 160; this.kby = (dy / l) * 160;

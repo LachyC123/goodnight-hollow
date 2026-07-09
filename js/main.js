@@ -16,6 +16,10 @@ import { StoryManager } from './story.js';
 import { DialogueManager, ELSIE_FIRST_WAKE, nannyIntroLines, NANNY_DEFEAT_LINES } from './storyDialogue.js';
 import { HUB_OBJECTS, hubObjectPos } from './hub.js';
 import { awakeChildren, childPos } from './children.js';
+import {
+  Atmosphere, fxFor, drawShadow, drawLightPools, drawFlames, drawChestFlame,
+  drawVignette, drawGrade, drawGrain, drawDanger, drawHeatHaze,
+} from './fx.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -37,6 +41,8 @@ class Game {
     this.shakeMag = 0; this.shakeT = 0;
     this.fade = 0; this.fadeDir = 0; this.fadeCb = null;
     this.titleFlicker = 0;
+    this.atmosphere = new Atmosphere();
+    this.damageFlash = 0;
     this.setupDorm();
   }
 
@@ -192,6 +198,16 @@ class Game {
       });
     }
   }
+  // bright, fast, additive sparks — hit and death feedback
+  sparks(x, y, color = '#ffe0a0', n = 6) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, sp = 45 + Math.random() * 95;
+      this.particles.push({
+        x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 12,
+        t: 0.22 + Math.random() * 0.2, color, size: 1, add: true, grav: 230,
+      });
+    }
+  }
   startFade(cb) { this.fadeDir = 1; this.fadeCb = cb; }
 
   // ---------- update ----------
@@ -208,7 +224,10 @@ class Game {
     }
     this.shakeT = Math.max(0, this.shakeT - dt);
     if (this.shakeT <= 0) this.shakeMag = 0;
+    this.damageFlash = Math.max(0, this.damageFlash - dt);
+    this.atmosphere.update(dt);
     for (const p of this.particles) {
+      if (p.grav) p.vy += p.grav * dt;
       p.x += p.vx * dt; p.y += p.vy * dt; p.t -= dt;
     }
     this.particles = this.particles.filter(p => p.t > 0);
@@ -654,6 +673,19 @@ class Game {
     for (const p of this.pickups) {
       const spr = KSPR[p.kind] || SPR.ribbon;
       const bob = Math.sin(performance.now() / 250 + p.x) * 1.5;
+      // warm glow beneath the flame pickup so it reads as a live ember
+      if (p.kind === 'flame') {
+        const gx = ox + p.x, gy = oy + p.y + bob;
+        const r = 9 + Math.sin(performance.now() / 110 + p.x) * 1.5;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        const g = ctx.createRadialGradient(gx, gy, 0, gx, gy, r);
+        g.addColorStop(0, 'rgba(255,190,100,0.5)');
+        g.addColorStop(1, 'rgba(255,120,50,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(gx - r, gy - r, r * 2, r * 2);
+        ctx.restore();
+      }
       ctx.drawImage(spr, Math.round(ox + p.x - spr.width / 2), Math.round(oy + p.y - spr.height / 2 + bob));
     }
 
@@ -682,24 +714,58 @@ class Game {
       }
     }
     ents.sort((a, b) => a.y - b.y);
+    // grounding shadows, drawn first so nothing sits on top of its own shade
+    for (const e of ents) {
+      if (e.drawElsie) drawShadow(ctx, ox + this.elsie.x, oy + this.elsie.y, 9);
+      else if (e.drawChild) drawShadow(ctx, ox + e.px, oy + e.py, 9);
+      else if (e === this.player) { if (!this.player.dead) drawShadow(ctx, ox + e.x, oy + e.y, 9); }
+      else drawShadow(ctx, ox + e.x, oy + e.y, e.w || 10);
+    }
     for (const e of ents) {
       if (e.drawElsie) {
         ctx.drawImage(SPR.elsie, Math.round(ox + this.elsie.x - 5), Math.round(oy + this.elsie.y - 10));
       } else if (e.drawChild) {
         ctx.drawImage(SPR[e.drawChild.spr], Math.round(ox + e.px - 5), Math.round(oy + e.py - 10));
+      } else if (e === this.player) {
+        e.draw(ctx, ox, oy);
+        if (!this.player.dead) drawChestFlame(ctx, ox + e.x, oy + e.y - 3);
       } else e.draw(ctx, ox, oy);
     }
 
     // particles
     for (const p of this.particles) {
       ctx.globalAlpha = Math.min(1, p.t * 2.5);
+      if (p.add) ctx.globalCompositeOperation = 'lighter';
       ctx.fillStyle = p.color;
-      ctx.fillRect(Math.round(ox + p.x), Math.round(oy + p.y), 2, 2);
+      const s = p.size || 2;
+      ctx.fillRect(Math.round(ox + p.x), Math.round(oy + p.y), s, s);
+      if (p.add) ctx.globalCompositeOperation = 'source-over';
     }
     ctx.globalAlpha = 1;
 
-    // candlelight vignette
+    // candlelight vignette (darkness), then warm candle light + live flames
     this.drawLight(ox, oy);
+    drawLightPools(ctx, this.room, ox, oy);
+    drawFlames(ctx, this.room, ox, oy);
+
+    // drifting embers / dust, tinted for the current floor
+    const night = this.room.type === 'dorm' ? 1 : this.currentNight;
+    const fx = fxFor(night);
+    this.atmosphere.draw(ctx, fx.mote);
+
+    // heat-haze in the kitchen, steam-shimmer in the laundry
+    if (this.state === 'run' && (night === 3 || night === 4)) {
+      drawHeatHaze(ctx, night === 3 ? 1.3 : 0.9);
+    }
+
+    // cinematic post-processing: colour grade, edge vignette, film grain, danger
+    drawGrade(ctx, fx.grade);
+    drawVignette(ctx);
+    drawGrain(ctx, 0.045);
+    const lowFrac = this.player.maxStitches
+      ? Math.max(0, 1 - this.player.stitches / (this.player.maxStitches * 0.34))
+      : 0;
+    drawDanger(ctx, this.damageFlash, this.player.dead ? 0 : lowFrac);
 
     // dorm extras
     if (this.state === 'dorm' || (this.state !== 'run' && this.room.type === 'dorm')) this.drawDormOverlay(ox, oy);
@@ -863,7 +929,13 @@ class Game {
 
   drawTitle() {
     const t = this.titleFlicker;
+    drawVignette(ctx);
+    // drifting embers behind the title
+    this.atmosphere.draw(ctx, '#ffb861');
     ctx.textAlign = 'center';
+    // warm glow behind Mallow, from the candle in her chest
+    drawChestFlame(ctx, W / 2, 104);
+    drawChestFlame(ctx, W / 2, 104);
     // candle
     ctx.drawImage(SPR.mallow, 0, 0, 12, 14, W / 2 - 24, 70, 48, 56);
     const flick = 0.85 + Math.sin(t * 7) * 0.1 + Math.sin(t * 23) * 0.05;
