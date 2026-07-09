@@ -44,6 +44,8 @@ class Enemy {
     const cx = this.x - nx * 4, cy = this.y - ny * 4;   // contact point
     this.game.sparks(cx, cy, '#ffe6b0', 7);
     this.game.player.gainFlame(6);
+    const crit = from === this.game.player && this.game.player.flourish;
+    this.game.damageNumber(this.x, this.y - 4, dmg, crit ? 'crit' : 'hit');
     const killed = this.hp <= 0;
     this.game.impact(cx, cy, killed);                    // hitstop + shake + combo + ring
     Sfx.hit(this.game.combo);

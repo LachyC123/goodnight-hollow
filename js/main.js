@@ -17,6 +17,7 @@ import { DialogueManager, ELSIE_FIRST_WAKE, nannyIntroLines, NANNY_DEFEAT_LINES 
 import { HUB_OBJECTS, hubObjectPos } from './hub.js';
 import { awakeChildren, childPos } from './children.js';
 import { PROLOGUE, CODEX, MEMORY_LORE } from './lore.js';
+import { Music } from './music.js';
 import {
   Atmosphere, fxFor, drawShadow, drawLightPools, drawFlames, drawChestFlame,
   drawVignette, drawGrade, drawGrain, drawDanger, drawHeatHaze,
@@ -76,6 +77,9 @@ class Game {
     this.codexSel = 0;        // selected codex entry
     this.whisperT = 0; this.whisper = null; // hub ambient whispers
     this.creakT = 3;          // hub ambient sound timer
+    this.floaters = [];       // floating damage numbers
+    this.bossIntro = null;    // cinematic boss title-card
+    this.music = new Music(); // adaptive ambient score
     this.setupDorm();
   }
 
@@ -149,13 +153,10 @@ class Game {
       Sfx.doorLock();
       if (this.room.type === 'boss') {
         this.story.onBossReached();
-        if (this.nightData.bossKind === 'nanny') {
-          this.dialogue.say(nannyIntroLines(this.story));
-        } else {
-          this.dialogue.say([
-            { who: this.nightData.boss, text: this.nightData.bossIntro },
-          ]);
-        }
+        const lines = this.nightData.bossKind === 'nanny'
+          ? nannyIntroLines(this.story)
+          : [{ who: this.nightData.boss, text: this.nightData.bossIntro }];
+        this.startBossIntro(this.nightData.boss, this.nightData.floor, lines);
         Sfx.bossRoar();
       }
     } else {
@@ -280,6 +281,49 @@ class Game {
     this.comboPop = 0.16;
     this.story.onCombo(this.combo);
   }
+  // steer the adaptive score toward the current situation
+  updateMusic(dt) {
+    if (!this.music.on) return;
+    let mood = 'calm';
+    if (this.state === 'run') {
+      const boss = this.enemies.some(e => e.isBoss && !e.dead);
+      const fighting = this.enemies.some(e => !e.dead);
+      mood = boss ? 'boss' : (fighting ? 'combat' : 'explore');
+      if (!this.player.dead && this.player.stitches <= 2) mood = 'danger';
+      if (this.music.floor !== this.currentNight) this.music.setFloor(this.currentNight);
+    } else if (this.state === 'title' || this.state === 'cutscene') {
+      mood = 'calm';
+    }
+    this.music.setMood(mood);
+    this.music.update(dt);
+  }
+
+  // floating combat number that rises and fades
+  damageNumber(x, y, amount, kind = 'hit') {
+    const n = Math.max(1, Math.round(amount));
+    const style = kind === 'crit' ? { c: '#ffb347', s: 11, txt: n }
+      : kind === 'parry' ? { c: '#ffe08a', s: 8, txt: n }
+      : { c: '#e8e0d8', s: 8, txt: n };
+    this.floaters.push({
+      x: x + (Math.random() - 0.5) * 6, y: y - 8, vy: -34,
+      t: 0.7, text: '' + style.txt, color: style.c, size: style.s,
+    });
+  }
+
+  // ---------- cinematic boss intro ----------
+  startBossIntro(name, floor, lines) {
+    this.bossIntro = { name, floor, lines, t: 0, dur: 2.4 };
+    this.shake(6, 0.5);
+  }
+  tickBossIntro(dt) {
+    const b = this.bossIntro;
+    b.t += dt;
+    if (b.t >= b.dur) {
+      this.dialogue.say(b.lines);
+      this.bossIntro = null;
+    }
+  }
+
   // a perfectly-timed dodge: bullet-time, flame reward, and a cool spark burst
   onPerfectDodge(p) {
     this.slowmoT = Math.max(this.slowmoT, 0.3);
@@ -339,6 +383,9 @@ class Game {
     if (this.comboT > 0) { this.comboT -= dt; if (this.comboT <= 0) this.combo = 0; }
     for (const im of this.impacts) im.t -= dt;
     if (this.impacts.length) this.impacts = this.impacts.filter(im => im.t > 0);
+    for (const f of this.floaters) { f.y += f.vy * dt; f.vy += 26 * dt; f.t -= dt; }
+    if (this.floaters.length) this.floaters = this.floaters.filter(f => f.t > 0);
+    this.updateMusic(dt);
     this.atmosphere.update(dt);
     if (this.state === 'run' || this.state === 'dorm') this.ambientEmit(dt);
     for (const p of this.particles) {
@@ -370,7 +417,7 @@ class Game {
   updateTitle(dt) {
     this.titleFlicker += dt;
     if (Input.confirm()) {
-      Sfx.unlock(); Sfx.bell();
+      Sfx.unlock(); this.music.start(); Sfx.bell();
       // first launch: play the prologue so the story has a foothold
       if (!this.story.flag('sawPrologue')) {
         this.startCutscene(PROLOGUE, () => {
@@ -574,6 +621,7 @@ class Game {
   }
 
   updateRun(dt) {
+    if (this.bossIntro) { this.tickBossIntro(dt); return; }  // hold the room for the title-card
     if (this.dialogue.active) { this.dialogue.update(dt); return; }
     this.run.timeElapsed += dt;
     this.player.update(dt, this.room);
@@ -1010,6 +1058,20 @@ class Game {
       }
     }
 
+    // floating damage numbers
+    for (const f of this.floaters) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, f.t * 2.2);
+      ctx.font = `${f.size}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#14101c';
+      ctx.fillText(f.text, ox + f.x + 1, oy + f.y + 1);
+      ctx.fillStyle = f.color;
+      ctx.fillText(f.text, ox + f.x, oy + f.y);
+      ctx.restore();
+    }
+    ctx.textAlign = 'left';
+
     // floating combo counter above Mallow, punching on each new hit
     if (this.combo >= 2 && this.state === 'run' && !this.player.dead) {
       ctx.save();
@@ -1029,6 +1091,7 @@ class Game {
 
     this.drawHud();
 
+    if (this.bossIntro) this.drawBossIntro();
     if (this.state === 'pretendChoice') this.drawPretendChoice();
     if (this.state === 'cradle') this.drawCradle();
     if (this.state === 'codex') this.drawCodex();
@@ -1218,8 +1281,38 @@ class Game {
       const nlabel = `NIGHT ${this.currentNight}`;
       ctx.fillStyle = '#7a6a92';
       ctx.fillText(nlabel, W - 8 - ctx.measureText(nlabel).width, 18);
+      // run-progress pips: one per planned room, filled as you descend
+      if (this.run) {
+        const rooms = this.run.rooms, px0 = W - 8 - rooms.length * 8;
+        for (let i = 0; i < rooms.length; i++) {
+          const rx = px0 + i * 8;
+          const cur = i === this.run.roomIndex;
+          const done = i < this.run.roomIndex;
+          const isBoss = rooms[i].type === 'boss', isMem = rooms[i].type === 'memory';
+          ctx.fillStyle = cur ? '#ffe08a' : done ? '#7a6a92' : '#3a3450';
+          if (isBoss) { ctx.fillRect(rx, 22, 6, 6); }        // boss = square
+          else {
+            ctx.beginPath();
+            ctx.arc(rx + 3, 25, isMem ? 1.6 : 2.5, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      }
     } else {
       ctx.fillText('THE DORMITORY', W - 8 - ctx.measureText('THE DORMITORY').width, 9);
+    }
+    // house-awareness meter — the eye that widens as the house wakes
+    const aw = this.story.awareness;
+    if (aw > 0) {
+      const mx = W / 2 - 40, my = 6;
+      ctx.fillStyle = '#7a6a92';
+      ctx.font = '6px monospace';
+      ctx.fillText('THE HOUSE', mx, my + 4);
+      ctx.fillStyle = '#14101c';
+      ctx.fillRect(mx + 40, my, 40, 4);
+      ctx.fillStyle = `rgba(176,58,72,${0.6 + 0.4 * Math.sin(performance.now() / 500)})`;
+      ctx.fillRect(mx + 40, my, Math.round(40 * aw / 100), 4);
+      ctx.font = '7px monospace';
     }
     // boss bar
     const boss = this.enemies.find(e => e.isBoss);
@@ -1343,6 +1436,45 @@ class Game {
     }
     ctx.fillStyle = '#55506a';
     ctx.fillText('[A]/[D] choose · [ENTER] believe', W / 2, 195);
+    ctx.textAlign = 'left';
+  }
+
+  drawBossIntro() {
+    const b = this.bossIntro;
+    const p = Math.min(1, b.t / b.dur);
+    // cinematic letterbox that slides in
+    const barH = 34 * Math.min(1, b.t * 4);
+    ctx.fillStyle = '#050308';
+    ctx.fillRect(0, 0, W, barH);
+    ctx.fillRect(0, H - barH, W, barH);
+    // darken the scene behind the card
+    ctx.fillStyle = `rgba(5,3,8,${0.5 * Math.min(1, b.t * 2)})`;
+    ctx.fillRect(0, barH, W, H - barH * 2);
+    ctx.save();
+    ctx.textAlign = 'center';
+    // floor kicker
+    const appear = Math.min(1, Math.max(0, (b.t - 0.3) * 2));
+    ctx.globalAlpha = appear;
+    ctx.fillStyle = '#7a6a92';
+    ctx.font = '8px monospace';
+    ctx.fillText(b.floor, W / 2, H / 2 - 22);
+    // the boss name, scaling in with a red underline
+    const s = 1 + (1 - appear) * 0.4;
+    ctx.save();
+    ctx.translate(W / 2, H / 2);
+    ctx.scale(s, s);
+    ctx.fillStyle = '#e8e0d8';
+    ctx.font = '16px monospace';
+    const pulse = 0.85 + 0.15 * Math.sin(performance.now() / 120);
+    ctx.globalAlpha = appear * pulse;
+    ctx.fillText(b.name, 0, 0);
+    ctx.restore();
+    // red rule under the name
+    ctx.globalAlpha = appear;
+    ctx.fillStyle = '#b03a48';
+    const uw = 120 * appear;
+    ctx.fillRect(W / 2 - uw / 2, H / 2 + 10, uw, 2);
+    ctx.restore();
     ctx.textAlign = 'left';
   }
 

@@ -6,6 +6,9 @@ function ac() {
   return ctx;
 }
 
+// shared context, so the music layer and SFX use one AudioContext
+export function audioContext() { return ac(); }
+
 function tone(freq, dur, type = 'square', vol = 0.08, slide = 0) {
   try {
     const a = ac();
