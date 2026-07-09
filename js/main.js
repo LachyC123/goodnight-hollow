@@ -17,8 +17,8 @@ import { DialogueManager, ELSIE_FIRST_WAKE, nannyIntroLines, NANNY_DEFEAT_LINES 
 import { HUB_OBJECTS, hubObjectPos } from './hub.js';
 import { awakeChildren, childPos } from './children.js';
 import {
-  Atmosphere, fxFor, drawShadow, drawLightPools, drawChestFlame,
-  drawVignette, drawGrade, drawGrain, drawDanger,
+  Atmosphere, fxFor, drawShadow, drawLightPools, drawFlames, drawChestFlame,
+  drawVignette, drawGrade, drawGrain, drawDanger, drawHeatHaze,
 } from './fx.js';
 
 const canvas = document.getElementById('game');
@@ -198,6 +198,16 @@ class Game {
       });
     }
   }
+  // bright, fast, additive sparks — hit and death feedback
+  sparks(x, y, color = '#ffe0a0', n = 6) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, sp = 45 + Math.random() * 95;
+      this.particles.push({
+        x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 12,
+        t: 0.22 + Math.random() * 0.2, color, size: 1, add: true, grav: 230,
+      });
+    }
+  }
   startFade(cb) { this.fadeDir = 1; this.fadeCb = cb; }
 
   // ---------- update ----------
@@ -217,6 +227,7 @@ class Game {
     this.damageFlash = Math.max(0, this.damageFlash - dt);
     this.atmosphere.update(dt);
     for (const p of this.particles) {
+      if (p.grav) p.vy += p.grav * dt;
       p.x += p.vx * dt; p.y += p.vy * dt; p.t -= dt;
     }
     this.particles = this.particles.filter(p => p.t > 0);
@@ -662,6 +673,19 @@ class Game {
     for (const p of this.pickups) {
       const spr = KSPR[p.kind] || SPR.ribbon;
       const bob = Math.sin(performance.now() / 250 + p.x) * 1.5;
+      // warm glow beneath the flame pickup so it reads as a live ember
+      if (p.kind === 'flame') {
+        const gx = ox + p.x, gy = oy + p.y + bob;
+        const r = 9 + Math.sin(performance.now() / 110 + p.x) * 1.5;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        const g = ctx.createRadialGradient(gx, gy, 0, gx, gy, r);
+        g.addColorStop(0, 'rgba(255,190,100,0.5)');
+        g.addColorStop(1, 'rgba(255,120,50,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(gx - r, gy - r, r * 2, r * 2);
+        ctx.restore();
+      }
       ctx.drawImage(spr, Math.round(ox + p.x - spr.width / 2), Math.round(oy + p.y - spr.height / 2 + bob));
     }
 
@@ -711,18 +735,28 @@ class Game {
     // particles
     for (const p of this.particles) {
       ctx.globalAlpha = Math.min(1, p.t * 2.5);
+      if (p.add) ctx.globalCompositeOperation = 'lighter';
       ctx.fillStyle = p.color;
-      ctx.fillRect(Math.round(ox + p.x), Math.round(oy + p.y), 2, 2);
+      const s = p.size || 2;
+      ctx.fillRect(Math.round(ox + p.x), Math.round(oy + p.y), s, s);
+      if (p.add) ctx.globalCompositeOperation = 'source-over';
     }
     ctx.globalAlpha = 1;
 
-    // candlelight vignette (darkness), then warm candle light punched back through it
+    // candlelight vignette (darkness), then warm candle light + live flames
     this.drawLight(ox, oy);
     drawLightPools(ctx, this.room, ox, oy);
+    drawFlames(ctx, this.room, ox, oy);
 
     // drifting embers / dust, tinted for the current floor
-    const fx = fxFor(this.room.type === 'dorm' ? 1 : this.currentNight);
+    const night = this.room.type === 'dorm' ? 1 : this.currentNight;
+    const fx = fxFor(night);
     this.atmosphere.draw(ctx, fx.mote);
+
+    // heat-haze in the kitchen, steam-shimmer in the laundry
+    if (this.state === 'run' && (night === 3 || night === 4)) {
+      drawHeatHaze(ctx, night === 3 ? 1.3 : 0.9);
+    }
 
     // cinematic post-processing: colour grade, edge vignette, film grain, danger
     drawGrade(ctx, fx.grade);

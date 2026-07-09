@@ -67,7 +67,7 @@ export function drawShadow(ctx, sx, sy, w = 10) {
 }
 
 // ---- Collect warm light sources from a room's candle decor ----
-function collectLights(room) {
+export function collectLights(room) {
   const lights = [];
   if (!room || !room.decor) return lights;
   for (const d of room.decor) {
@@ -100,6 +100,32 @@ export function drawLightPools(ctx, room, ox, oy) {
     g.addColorStop(1, 'rgba(255,120,50,0)');
     ctx.fillStyle = g;
     ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+  }
+  ctx.restore();
+}
+
+// ---- Animated flame tongues on every candle (drawn over the light pools) ----
+export function drawFlames(ctx, room, ox, oy) {
+  const lights = collectLights(room);
+  if (!lights.length) return;
+  const now = performance.now();
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const L of lights) {
+    const cx = ox + L.x, cy = oy + L.y;
+    const f = Math.sin(now / 68 + L.ph) * 0.5 + Math.sin(now / 33 + L.ph * 1.7) * 0.5;
+    const h = 4.2 + f * 1.3, w = 2.0 + f * 0.25;
+    const sway = Math.sin(now / 120 + L.ph) * 0.6;
+    // outer body
+    ctx.fillStyle = 'rgba(255,120,45,0.5)';
+    ctx.beginPath();
+    ctx.ellipse(cx + sway, cy - h * 0.3, w, h, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // bright core
+    ctx.fillStyle = 'rgba(255,228,155,0.9)';
+    ctx.beginPath();
+    ctx.ellipse(cx + sway * 0.6, cy, w * 0.5, h * 0.62, 0, 0, Math.PI * 2);
+    ctx.fill();
   }
   ctx.restore();
 }
@@ -168,6 +194,33 @@ export function drawGrain(ctx, alpha = 0.05) {
       ctx.drawImage(t, x, y);
   ctx.restore();
   ctx.globalAlpha = 1;
+}
+
+// ---- Subtle heat-haze / steam shimmer for the kitchen and laundry ----
+// Copies the frame to a scratch buffer, then redraws the lower half back in
+// thin horizontal bands nudged sideways by a travelling sine — a cheap wobble.
+let _scratch = null;
+function scratchCanvas() {
+  if (!_scratch) {
+    _scratch = document.createElement('canvas');
+    _scratch.width = W; _scratch.height = H;
+  }
+  return _scratch;
+}
+export function drawHeatHaze(ctx, amp = 1.2) {
+  const src = ctx.canvas;
+  const s = scratchCanvas();
+  const sc = s.getContext('2d');
+  sc.clearRect(0, 0, W, H);
+  sc.drawImage(src, 0, 0);
+  const now = performance.now() / 1000;
+  const top = Math.floor(H * 0.42);
+  const band = 3;
+  for (let y = top; y < H; y += band) {
+    const grow = (y - top) / (H - top);            // stronger toward the floor
+    const dx = Math.sin(y * 0.35 + now * 2.3) * amp * grow;
+    ctx.drawImage(s, 0, y, W, band, dx, y, W, band);
+  }
 }
 
 // ---- Red danger overlay: pulses when hurt, throbs while near death ----

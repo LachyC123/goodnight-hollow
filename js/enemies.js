@@ -22,6 +22,8 @@ class Enemy {
     const dx = this.x - from.x, dy = this.y - from.y;
     const l = Math.hypot(dx, dy) || 1;
     this.x += (dx / l) * 5; this.y += (dy / l) * 5;
+    // sparks fly from the struck point, toward where the needle came from
+    this.game.sparks(this.x - (dx / l) * 4, this.y - (dy / l) * 4, '#ffe0a0', 5);
     this.game.player.gainFlame(6);
     if (this.hp <= 0) this.die();
   }
@@ -29,6 +31,7 @@ class Enemy {
     this.dead = true;
     Sfx.enemyDie();
     this.game.puff(this.x, this.y, '#55506a');
+    this.game.sparks(this.x, this.y, '#ffd0a0', 9);
   }
   update(dt, room, player) {}
   drawSprite(ctx, ox, oy, spr) {
