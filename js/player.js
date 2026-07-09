@@ -22,6 +22,9 @@ export class Player {
     this.dead = false;
     this.vxLast = 0; this.vyLast = 0; // for "hold still" boss gazes
     this.hitThisSwing = new Set();
+    this.animPhase = 0;      // walk-cycle phase
+    this.moving = false;
+    this.ghosts = [];        // dodge afterimages
   }
 
   get keepsakes() { return this.game.save.keepsakes || {}; }
@@ -97,17 +100,25 @@ export class Player {
     if (this.slowed) speed *= 0.5;
     this.slowed = false;
 
+    // afterimage trail fades regardless of state
+    for (const g of this.ghosts) g.t -= dt;
+    if (this.ghosts.length) this.ghosts = this.ghosts.filter(g => g.t > 0);
+
     const px0 = this.x, py0 = this.y;
+    this.moving = false;
     if (this.kbT > 0) {
       this.kbT -= dt;
       moveEntity(this, this.kbx * dt, this.kby * dt, room);
     } else if (this.dodgeT > 0) {
       this.dodgeT -= dt;
       moveEntity(this, this.dvx * dt, this.dvy * dt, room);
+      this.ghosts.push({ x: this.x, y: this.y, t: 0.22 });
     } else {
       if (mx || my) {
         const l = Math.hypot(mx, my);
         moveEntity(this, (mx / l) * speed * dt, (my / l) * speed * dt, room);
+        this.moving = true;
+        this.animPhase += dt * 11;
       }
       if (Input.dodge() && this.dodgeCd <= 0) {
         const l = Math.hypot(mx, my);
@@ -134,24 +145,51 @@ export class Player {
   }
 
   draw(ctx, ox, oy) {
-    const flick = this.iframes > 0 && Math.floor(performance.now() / 60) % 2 === 0;
-    if (flick) return;
     const spr = this.stitches <= 2 ? SPR.mallowHurt : SPR.mallow;
-    const px = Math.round(ox + this.x - spr.width / 2);
-    const py = Math.round(oy + this.y - spr.height + 4);
-    ctx.drawImage(spr, px, py);
-    // low health: leaking stuffing
-    if (this.stitches <= 2 && Math.random() < 0.05) {
-      this.game.puff(this.x, this.y, '#e8e0d8');
-    }
-    // needle swing
-    if (this.attackT > 0) {
-      const b = this.attackBox();
+    // dodge afterimages — cool ghost trail behind Mallow
+    for (const g of this.ghosts) {
       ctx.save();
-      ctx.translate(ox + b.x, oy + b.y);
-      const ang = Math.atan2(this.facing.y, this.facing.x);
-      ctx.rotate(ang);
-      ctx.drawImage(SPR.needle, -6, -3);
+      ctx.globalAlpha = Math.min(0.5, g.t * 2.2);
+      ctx.drawImage(spr, Math.round(ox + g.x - spr.width / 2), Math.round(oy + g.y - spr.height + 4));
+      ctx.restore();
+    }
+    const flick = this.iframes > 0 && Math.floor(performance.now() / 60) % 2 === 0;
+    if (!flick) {
+      // walk bob while moving, a slow breath while still
+      const now = performance.now();
+      const bob = this.moving
+        ? -Math.abs(Math.sin(this.animPhase)) * 2
+        : Math.sin(now / 600) * 0.6;
+      const px = Math.round(ox + this.x - spr.width / 2);
+      const py = Math.round(oy + this.y - spr.height + 4 + bob);
+      ctx.drawImage(spr, px, py);
+      // low health: leaking stuffing
+      if (this.stitches <= 2 && Math.random() < 0.05) {
+        this.game.puff(this.x, this.y, '#e8e0d8');
+      }
+    }
+    // needle swing + bright slash arc
+    if (this.attackT > 0) {
+      const prog = 1 - this.attackT / 0.12;               // 0..1 through the swing
+      const base = Math.atan2(this.facing.y, this.facing.x);
+      const swing = base - 0.7 + 1.4 * prog;              // sweep across the arc
+      const r = 15;
+      ctx.save();
+      ctx.translate(ox + this.x, oy + this.y - 2);
+      ctx.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 5; i++) {
+        const a = swing - i * 0.15;
+        const alpha = (1 - prog) * (1 - i / 5) * 0.55;
+        if (alpha <= 0) continue;
+        ctx.strokeStyle = `rgba(255,236,180,${alpha})`;
+        ctx.lineWidth = 2.2 - i * 0.3;
+        ctx.beginPath();
+        ctx.arc(0, 0, r, a - 0.06, a + 0.06);
+        ctx.stroke();
+      }
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.rotate(swing);
+      ctx.drawImage(SPR.needle, r - 8, -3);
       ctx.restore();
     }
   }

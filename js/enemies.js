@@ -13,6 +13,8 @@ class Enemy {
     this.flash = 0;
     this.contactDamage = true;
     this.touchable = true; // takes hits
+    this.bob = true;                          // gentle idle sway
+    this.bobPhase = Math.random() * Math.PI * 2;
   }
   hit(dmg, from) {
     if (this.dead || !this.touchable) return;
@@ -35,8 +37,9 @@ class Enemy {
   }
   update(dt, room, player) {}
   drawSprite(ctx, ox, oy, spr) {
+    const b = this.bob ? Math.sin(performance.now() / 320 + this.bobPhase) * 1.1 : 0;
     const px = Math.round(ox + this.x - spr.width / 2);
-    const py = Math.round(oy + this.y - spr.height + 4);
+    const py = Math.round(oy + this.y - spr.height + 4 + b);
     if (this.flash > 0) {
       ctx.save();
       ctx.filter = 'brightness(3)';
@@ -404,6 +407,7 @@ export class DeskMimic extends Enemy {
     this.t = 0;
     this.contactDamage = false;
     this.touchable = true;
+    this.bob = false;                         // furniture: sits dead still
   }
   update(dt, room, player) {
     this.flash = Math.max(0, this.flash - dt);

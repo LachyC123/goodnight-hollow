@@ -723,9 +723,11 @@ class Game {
     }
     for (const e of ents) {
       if (e.drawElsie) {
-        ctx.drawImage(SPR.elsie, Math.round(ox + this.elsie.x - 5), Math.round(oy + this.elsie.y - 10));
+        const b = Math.sin(performance.now() / 560) * 0.7;
+        ctx.drawImage(SPR.elsie, Math.round(ox + this.elsie.x - 5), Math.round(oy + this.elsie.y - 10 + b));
       } else if (e.drawChild) {
-        ctx.drawImage(SPR[e.drawChild.spr], Math.round(ox + e.px - 5), Math.round(oy + e.py - 10));
+        const b = Math.sin(performance.now() / 500 + e.px) * 0.7;
+        ctx.drawImage(SPR[e.drawChild.spr], Math.round(ox + e.px - 5), Math.round(oy + e.py - 10 + b));
       } else if (e === this.player) {
         e.draw(ctx, ox, oy);
         if (!this.player.dead) drawChestFlame(ctx, ox + e.x, oy + e.y - 3);
