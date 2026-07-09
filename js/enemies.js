@@ -3,6 +3,19 @@ import { SPR } from './sprites.js';
 import { Sfx } from './audio.js';
 import { moveEntity, overlap, dist, TS, COLS, ROWS } from './world.js';
 
+// states during which an enemy or boss is winding up to strike — telegraphed on
+// the floor. Covers the shared minion states plus each boss's charge/attack
+// windups (the gaze/recite "hold still" states are intentionally excluded, since
+// their danger is moving, not proximity).
+const TELEGRAPH = new Set([
+  'windup', 'charge', 'slam',                    // minions + shared
+  'chargeWindup',                                // Nanny
+  'rulers', 'gazeWind',                          // Teacher
+  'spray', 'ring', 'slamWind',                   // Cook
+  'wring', 'sheets', 'steam',                    // Laundress
+  'shards', 'reciteWind', 'hands',               // Mother Mercy
+]);
+
 class Enemy {
   constructor(game, x, y) {
     this.game = game;
@@ -13,6 +26,8 @@ class Enemy {
     this.flash = 0;
     this.contactDamage = true;
     this.touchable = true; // takes hits
+    this.bob = true;                          // gentle idle sway
+    this.bobPhase = Math.random() * Math.PI * 2;
   }
   hit(dmg, from) {
     if (this.dead || !this.touchable) return;
@@ -34,9 +49,25 @@ class Enemy {
     this.game.sparks(this.x, this.y, '#ffd0a0', 9);
   }
   update(dt, room, player) {}
+  // a throbbing red ring on the floor while winding up to strike. Drawn from the
+  // shared entity pass in main.js so it covers bosses (which use custom draw()).
+  drawTelegraph(ctx, ox, oy) {
+    if (this.dead || !TELEGRAPH.has(this.state)) return;
+    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 90);
+    const rr = (this.isBoss ? 22 : 12) + pulse * 4;
+    ctx.save();
+    ctx.globalAlpha = 0.22 + 0.4 * pulse;
+    ctx.strokeStyle = '#ff5a44';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.ellipse(ox + this.x, oy + this.y + 3, rr, rr * 0.5, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
   drawSprite(ctx, ox, oy, spr) {
+    const b = this.bob ? Math.sin(performance.now() / 320 + this.bobPhase) * 1.1 : 0;
     const px = Math.round(ox + this.x - spr.width / 2);
-    const py = Math.round(oy + this.y - spr.height + 4);
+    const py = Math.round(oy + this.y - spr.height + 4 + b);
     if (this.flash > 0) {
       ctx.save();
       ctx.filter = 'brightness(3)';
@@ -404,6 +435,7 @@ export class DeskMimic extends Enemy {
     this.t = 0;
     this.contactDamage = false;
     this.touchable = true;
+    this.bob = false;                         // furniture: sits dead still
   }
   update(dt, room, player) {
     this.flash = Math.max(0, this.flash - dt);

@@ -25,6 +25,16 @@ const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 ctx.imageSmoothingEnabled = false;
 
+// Per-floor ambient flecks: {spawn interval, x-jitter, fall speed (+down/-up), life, colour, size, additive}
+const AMBIENT = {
+  0: { every: 0.6, vx: 6, vy: 8, life: 3.5, color: '#8fb0c8', size: 1, add: true },   // dorm: dust in moonlight
+  1: { every: 0.5, vx: 5, vy: 10, life: 3.0, color: '#7a6a58', size: 1, add: false },  // nursery: falling ash
+  2: { every: 0.5, vx: 4, vy: 9, life: 3.0, color: '#9fd8c0', size: 1, add: false },   // lesson: chalk dust
+  3: { every: 0.7, vx: 8, vy: -14, life: 2.0, color: '#ffb066', size: 1, add: true },  // kitchen: rising embers
+  4: { every: 0.4, vx: 2, vy: 26, life: 1.6, color: '#9fc0d8', size: 1, add: true },   // laundry: dripping water
+  5: { every: 0.6, vx: 4, vy: 8, life: 3.2, color: '#9a8aa2', size: 1, add: false },   // attic: settling dust
+};
+
 class Game {
   constructor() {
     this.state = 'title';
@@ -43,6 +53,7 @@ class Game {
     this.titleFlicker = 0;
     this.atmosphere = new Atmosphere();
     this.damageFlash = 0;
+    this.ambT = 0;            // ambient-fleck spawn timer
     this.setupDorm();
   }
 
@@ -198,6 +209,22 @@ class Game {
       });
     }
   }
+  // slow, floor-appropriate ambient flecks drifting through the room
+  ambientEmit(dt) {
+    const key = this.room.type === 'dorm' ? 0 : this.currentNight;
+    const spec = AMBIENT[key];
+    if (!spec) return;
+    this.ambT = (this.ambT || 0) - dt;
+    if (this.ambT > 0) return;
+    this.ambT = spec.every * (0.5 + Math.random());
+    this.particles.push({
+      x: 8 + Math.random() * (COLS * TS - 16),
+      y: spec.vy > 0 ? 2 + Math.random() * 6 : ROWS * TS - 6,
+      vx: spec.vx * (Math.random() - 0.5),
+      vy: spec.vy * (0.7 + Math.random() * 0.6),
+      t: spec.life, color: spec.color, size: spec.size, add: spec.add,
+    });
+  }
   // bright, fast, additive sparks — hit and death feedback
   sparks(x, y, color = '#ffe0a0', n = 6) {
     for (let i = 0; i < n; i++) {
@@ -226,6 +253,7 @@ class Game {
     if (this.shakeT <= 0) this.shakeMag = 0;
     this.damageFlash = Math.max(0, this.damageFlash - dt);
     this.atmosphere.update(dt);
+    if (this.state === 'run' || this.state === 'dorm') this.ambientEmit(dt);
     for (const p of this.particles) {
       if (p.grav) p.vy += p.grav * dt;
       p.x += p.vx * dt; p.y += p.vy * dt; p.t -= dt;
@@ -714,18 +742,24 @@ class Game {
       }
     }
     ents.sort((a, b) => a.y - b.y);
-    // grounding shadows, drawn first so nothing sits on top of its own shade
+    // grounding shadows (and attack telegraphs), drawn first so nothing sits on
+    // top of its own shade or ring
     for (const e of ents) {
       if (e.drawElsie) drawShadow(ctx, ox + this.elsie.x, oy + this.elsie.y, 9);
       else if (e.drawChild) drawShadow(ctx, ox + e.px, oy + e.py, 9);
       else if (e === this.player) { if (!this.player.dead) drawShadow(ctx, ox + e.x, oy + e.y, 9); }
-      else drawShadow(ctx, ox + e.x, oy + e.y, e.w || 10);
+      else {
+        drawShadow(ctx, ox + e.x, oy + e.y, e.w || 10);
+        if (e.drawTelegraph) e.drawTelegraph(ctx, ox, oy);
+      }
     }
     for (const e of ents) {
       if (e.drawElsie) {
-        ctx.drawImage(SPR.elsie, Math.round(ox + this.elsie.x - 5), Math.round(oy + this.elsie.y - 10));
+        const b = Math.sin(performance.now() / 560) * 0.7;
+        ctx.drawImage(SPR.elsie, Math.round(ox + this.elsie.x - 5), Math.round(oy + this.elsie.y - 10 + b));
       } else if (e.drawChild) {
-        ctx.drawImage(SPR[e.drawChild.spr], Math.round(ox + e.px - 5), Math.round(oy + e.py - 10));
+        const b = Math.sin(performance.now() / 500 + e.px) * 0.7;
+        ctx.drawImage(SPR[e.drawChild.spr], Math.round(ox + e.px - 5), Math.round(oy + e.py - 10 + b));
       } else if (e === this.player) {
         e.draw(ctx, ox, oy);
         if (!this.player.dead) drawChestFlame(ctx, ox + e.x, oy + e.y - 3);
@@ -747,6 +781,7 @@ class Game {
     this.drawLight(ox, oy);
     drawLightPools(ctx, this.room, ox, oy);
     drawFlames(ctx, this.room, ox, oy);
+    if (this.room.type === 'dorm') this.drawMoonbeam(ox, oy);
 
     // drifting embers / dust, tinted for the current floor
     const night = this.room.type === 'dorm' ? 1 : this.currentNight;
@@ -778,6 +813,31 @@ class Game {
     if (this.state === 'death') this.drawDeath();
     this.dialogue.draw(ctx, W, H);
     this.drawFade();
+  }
+
+  // living moonlight through the Dormitory window: a breathing cool beam + glow
+  drawMoonbeam(ox, oy) {
+    const now = performance.now();
+    const flick = 0.82 + Math.sin(now / 1400) * 0.14 + Math.sin(now / 2300) * 0.05;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.07 * flick;
+    ctx.fillStyle = '#8fb0c8';
+    ctx.beginPath();
+    ctx.moveTo(ox + 10 * TS + 2, oy + TS);
+    ctx.lineTo(ox + 10 * TS + 32, oy + TS);
+    ctx.lineTo(ox + 10 * TS + 52, oy + TS * 6);
+    ctx.lineTo(ox + 10 * TS - 18, oy + TS * 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    const wx = ox + 10 * TS + 17, wy = oy + 8;
+    const g = ctx.createRadialGradient(wx, wy, 2, wx, wy, 26 * flick);
+    g.addColorStop(0, 'rgba(143,176,200,0.26)');
+    g.addColorStop(1, 'rgba(143,176,200,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(wx - 28, wy - 28, 56, 56);
+    ctx.restore();
   }
 
   drawLight(ox, oy) {
@@ -1151,10 +1211,33 @@ class Game {
   }
 
   drawFade() {
-    if (this.fade > 0) {
-      ctx.fillStyle = `rgba(5,3,8,${this.fade})`;
+    const f = this.fade;
+    if (f <= 0) return;
+    // candle-snuff iris: the dark closes in toward Mallow, with a warm guttering rim
+    let cx = W / 2, cy = H / 2;
+    if (!['title', 'end', 'finale'].includes(this.state) && this.player) {
+      cx = OX + this.player.x; cy = OY + this.player.y;
+    }
+    const holeR = (W * 0.7) * (1 - f);
+    // both stops scale with f so the overlay eases from fully transparent at the
+    // start of the fade to fully black at the end (no edge "pop" on frame one)
+    const coreA = Math.max(0, (f - 0.75) / 0.25) * f;   // centre only blacks out at the very end
+    ctx.save();
+    const g = ctx.createRadialGradient(cx, cy, Math.max(0, holeR * 0.55), cx, cy, holeR + 60);
+    g.addColorStop(0, `rgba(5,3,8,${coreA})`);
+    g.addColorStop(1, `rgba(5,3,8,${f})`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+    if (holeR > 4 && f < 0.98) {
+      ctx.globalCompositeOperation = 'lighter';
+      const rim = ctx.createRadialGradient(cx, cy, holeR * 0.6, cx, cy, holeR + 10);
+      rim.addColorStop(0, 'rgba(255,150,60,0)');
+      rim.addColorStop(0.82, `rgba(255,150,60,${0.28 * f})`);
+      rim.addColorStop(1, 'rgba(255,150,60,0)');
+      ctx.fillStyle = rim;
       ctx.fillRect(0, 0, W, H);
     }
+    ctx.restore();
   }
 }
 
