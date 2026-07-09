@@ -172,7 +172,7 @@ export const ELSIE_DIALOGUE = [
     id: 'elsie_house_awake',
     speaker: 'Elsie',
     priority: 20,
-    repeatable: true,
+    repeatable: false, // a one-time beat — repeating it would suppress pre-night guidance
     condition: ({ state }) => (state.houseAwareness || 0) >= 40,
     lines: [
       ...['The house is louder lately.', 'It says your name in its sleep now. It didn\'t used to.',

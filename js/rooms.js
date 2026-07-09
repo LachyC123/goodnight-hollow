@@ -1,6 +1,6 @@
 // Room construction and rendering for the Dormitory and the five floors.
 import { SPR } from './sprites.js';
-import { TS, COLS, ROWS } from './world.js';
+import { TS, COLS, ROWS, solidAt } from './world.js';
 import {
   ButtonMouse, BlanketCrawler, CryingDoll, Nanny,
   ChalkWraith, DeskMimic, SpoonSwarm, PorridgeBlob, SheetGhost, MangleHound,
@@ -284,7 +284,15 @@ export function spawnEnemies(room, game) {
   }
   if (room.type === 'combat' && diff.count > 0) {
     for (let i = 0; i < diff.count; i++) {
-      const x = (4 + Math.random() * 20) * TS, y = (3 + Math.random() * 8) * TS;
+      // find an open tile — never spawn inside decor (it could stick and stall
+      // the room-clear check that opens the door)
+      let x = 0, y = 0, ok = false;
+      for (let tries = 0; tries < 24 && !ok; tries++) {
+        x = (3 + Math.random() * 22) * TS;
+        y = (2 + Math.random() * 10) * TS;
+        ok = !solidAt(room, x, y);
+      }
+      if (!ok) continue;
       const extra = new ButtonMouse(game, x, y);
       extra.hp = Math.max(1, Math.round(extra.hp * diff.hp));
       out.push(extra);
