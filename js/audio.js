@@ -54,6 +54,8 @@ export const Sfx = {
   perfectDodge() { tone(720, 0.14, 'sine', 0.07, 520); tone(1080, 0.18, 'sine', 0.05, 260); },
   // the empowered flourish swing: a heavier whoosh with a bell edge
   flourish() { noise(0.07, 0.05); tone(360, 0.12, 'sawtooth', 0.06, -240); tone(660, 0.14, 'sine', 0.05, -60); },
+  // a needle-parry: a bright metallic ting
+  parry() { tone(1400, 0.06, 'square', 0.05, -200); tone(2100, 0.09, 'sine', 0.05, 400); noise(0.03, 0.03); },
   enemyDie() { noise(0.15, 0.07); tone(90, 0.2, 'triangle', 0.08, -50); },
   pickup() { tone(660, 0.1, 'sine', 0.06, 220); tone(880, 0.12, 'sine', 0.05, 110); },
   doorOpen() { tone(160, 0.3, 'triangle', 0.07, 60); },

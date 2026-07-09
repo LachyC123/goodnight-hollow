@@ -73,6 +73,7 @@ export function freshRunTemp(floor = null) {
     // combat-shape of the run — how Mallow fought, for reactive dialogue
     currentRunBiggestCombo: 0,
     currentRunPerfectDodges: 0,
+    currentRunParries: 0,
     currentRunDamageTaken: 0,
   };
 }
@@ -114,6 +115,7 @@ export class StoryManager {
   onDollSeen(n = 1) { this.run.cryingDollsSeen += n; }
   onCombo(n) { if (n > this.run.currentRunBiggestCombo) this.run.currentRunBiggestCombo = n; }
   onPerfectDodge() { this.run.currentRunPerfectDodges++; }
+  onParry() { this.run.currentRunParries++; }
 
   onDollKilled() {
     this.run.currentRunCryingDollsKilled++;
@@ -232,8 +234,10 @@ export function buildRunSummary(run, state) {
     // how Mallow fought — surfaced to reactive dialogue
     biggestCombo: run.currentRunBiggestCombo,
     perfectDodges: run.currentRunPerfectDodges,
+    parries: run.currentRunParries,
     ferocious: run.currentRunBiggestCombo >= 6,
     graceful: run.currentRunPerfectDodges >= 3,
+    deflector: run.currentRunParries >= 3,
     flawless: run.currentRunDamageTaken === 0 &&
       (run.currentRunBossDefeated || run.currentRunRoomsCleared >= 4),
     reacted: false, // set true once the Dormitory reaction has played

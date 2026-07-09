@@ -258,6 +258,30 @@ class Game {
     Sfx.perfectDodge();
     this.story.onPerfectDodge();
   }
+  // parry: a swing that catches a projectile sends it back, now friendly
+  parryProjectile(p) {
+    let best = null, bd = Infinity;
+    for (const e of this.enemies) {
+      if (e.dead) continue;
+      const d = dist(e, this.player);
+      if (d < bd) { bd = d; best = e; }
+    }
+    const speed = (Math.hypot(p.vx, p.vy) || 130) * 1.4;
+    if (best) {
+      const dx = best.x - p.x, dy = best.y - p.y, l = Math.hypot(dx, dy) || 1;
+      p.vx = (dx / l) * speed; p.vy = (dy / l) * speed;
+    } else { p.vx = -p.vx * 1.4; p.vy = -p.vy * 1.4; }
+    p.friendly = true;
+    p.color = '#ffe08a';
+    p.t = Math.max(p.t, 1.6);
+    this.player.gainFlame(10);
+    this.sparks(p.x, p.y, '#ffe08a', 8);
+    this.impacts.push({ x: p.x, y: p.y, t: 0.22, max: 0.22, kill: false });
+    this.hitStop = Math.max(this.hitStop, 0.05);
+    this.shake(2.6, 0.12);
+    Sfx.parry();
+    this.story.onParry();
+  }
   startFade(cb) { this.fadeDir = 1; this.fadeCb = cb; }
 
   // ---------- update ----------
@@ -455,11 +479,15 @@ class Game {
       if (e.stun > 0) { e.stun -= dt; e.flash = Math.max(0, e.flash - dt); }
       else e.update(dt, this.room, this.player);
     }
-    // projectiles
+    // projectiles — friendly (parried) ones hunt enemies; the rest hunt Mallow
     for (const p of this.projectiles) {
       p.x += p.vx * dt; p.y += p.vy * dt; p.t -= dt;
-      if (solidAt(this.room, p.x, p.y)) p.t = 0;
-      else if (dist(p, this.player) < (p.r || 2) + 4) {
+      if (solidAt(this.room, p.x, p.y)) { p.t = 0; continue; }
+      if (p.friendly) {
+        for (const e of this.enemies) {
+          if (!e.dead && dist(p, e) < (p.r || 2) + (e.w || 8) / 2) { e.hit(1, p); p.t = 0; break; }
+        }
+      } else if (dist(p, this.player) < (p.r || 2) + 4) {
         p.t = 0;
         this.player.hurt(1, p.x - p.vx, p.y - p.vy);
       }
@@ -472,6 +500,13 @@ class Game {
         if (!e.dead && !this.player.hitThisSwing.has(e) && overlap(box, e)) {
           this.player.hitThisSwing.add(e);
           e.hit(this.player.damage(), this.player);
+        }
+      }
+      // catch enemy projectiles in the swing and send them back
+      for (const p of this.projectiles) {
+        const r = p.r || 2;
+        if (!p.friendly && overlap(box, { x: p.x, y: p.y, w: r * 2, h: r * 2 })) {
+          this.parryProjectile(p);
         }
       }
     }
