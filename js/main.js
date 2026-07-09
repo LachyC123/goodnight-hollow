@@ -567,6 +567,40 @@ class Game {
     this.dialogue.say(lines, () => { if (picked) picked.apply(); });
   }
 
+  // does an NPC have a story-critical beat waiting? (priority > 10 = not idle
+  // chatter — matches talkToElsie's own cutoff). Used to flag who to talk to.
+  elsieHasNews() {
+    if (this.save.endingSeen) return false;
+    const p = this.storyDialogue.pick();
+    return !!(p && p.priority > 10);
+  }
+  childHasNews(c) {
+    if (this.save.endingSeen) return false;
+    if (!this.childDialogues[c.id]) this.childDialogues[c.id] = new DialogueManager(this.story, c.dialogue);
+    const p = this.childDialogues[c.id].pick();
+    return !!(p && p.priority > 10);
+  }
+  // the single clearest next step, shown as a gentle objective line
+  objectiveHint() {
+    if (!this.bellRung || this.dialogue.active) return null;
+    if (this.elsieHasNews()) return 'Elsie is waiting to speak — talk to her.';
+    for (const c of awakeChildren(this.save)) if (this.childHasNews(c)) return 'Someone new has something to tell you.';
+    if (this.room.doorsOpen) return 'When you are ready, step through the door to descend.';
+    return null;
+  }
+  drawNewsMark(x, y) {
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.font = '11px monospace';
+    ctx.globalAlpha = 0.8 + 0.2 * Math.sin(performance.now() / 150);
+    ctx.fillStyle = '#14101c';
+    ctx.fillText('!', x + 1, y + 1);
+    ctx.fillStyle = '#ffe08a';
+    ctx.fillText('!', x, y);
+    ctx.restore();
+    ctx.textAlign = 'left';
+  }
+
   talkToChild(c) {
     if (this.save.endingSeen) {
       const morning = {
@@ -910,7 +944,7 @@ class Game {
 
     drawRoom(ctx, this.room, ox, oy);
 
-    // memory spot glow
+    // memory spot glow + a legible cue so the story beat isn't walked past
     if (this.room.type === 'memory' && !this.room.memorySpot.seen) {
       const s = this.room.memorySpot;
       ctx.save();
@@ -920,6 +954,15 @@ class Game {
       ctx.arc(ox + s.x, oy + s.y, s.r, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
+      if (!this.dialogue.active) {
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.font = '7px monospace';
+        ctx.fillStyle = `rgba(255,224,138,${0.5 + 0.3 * Math.sin(performance.now() / 400)})`;
+        ctx.fillText('a memory lingers here — step into the light', ox + s.x, oy + s.y - s.r - 6);
+        ctx.restore();
+        ctx.textAlign = 'left';
+      }
     }
 
     // pickups
@@ -1190,6 +1233,27 @@ class Game {
           break;
         }
       }
+    }
+    // story markers: a bright "!" over anyone with a new beat to deliver, so
+    // the player always knows who advances the story
+    const nb = Math.sin(performance.now() / 220) * 1.5;
+    if (this.elsieHasNews() && dist(this.player, this.elsie) >= 22) {
+      this.drawNewsMark(ox + this.elsie.x, oy + this.elsie.y - 22 + nb);
+    }
+    for (const c of awakeChildren(this.save)) {
+      const p = childPos(c);
+      if (this.childHasNews(c) && dist(this.player, p) >= 22) this.drawNewsMark(ox + p.x, oy + p.y - 22 + nb);
+    }
+    // one clear objective line
+    const hint = this.objectiveHint();
+    if (hint) {
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.font = '7px monospace';
+      ctx.fillStyle = `rgba(255,224,138,${0.45 + 0.25 * Math.sin(performance.now() / 600)})`;
+      ctx.fillText(hint, W / 2, H - 22);
+      ctx.restore();
+      ctx.textAlign = 'left';
     }
     if (this.room.doorsOpen && !this.dialogue.active) {
       ctx.fillStyle = 'rgba(255,224,138,0.7)';
