@@ -298,6 +298,16 @@ export function spawnEnemies(room, game) {
       out.push(extra);
     }
   }
+  // elites — a rare, meaner variant, more likely on later floors and as the
+  // house wakes. Never the crying dolls (a moral choice) or the boss.
+  if (room.type === 'combat') {
+    const chance = Math.min(0.4, 0.06 + ((room.night || 1) - 1) * 0.04 + (diff.aware || 0) / 400);
+    let made = 0;
+    for (const e of out) {
+      if (made >= 2) break;
+      if (!e.isBoss && !e.isDoll && !e.elite && Math.random() < chance) { e.makeElite(); made++; }
+    }
+  }
   return out;
 }
 

@@ -19,10 +19,21 @@ export class Music {
   constructor() {
     this.on = false;
     this.enabled = true;
+    this.userVol = 1;    // 0..1, set from the pause menu
     this.mood = 'calm';
     this.floor = 1;
     this.beatTimer = 0;
     this.nodes = null;
+  }
+
+  setUserVolume(v) {
+    this.userVol = Math.max(0, Math.min(1, v));
+    if (this.on) {
+      try {
+        const target = (MOODS[this.mood] || MOODS.calm).master * this.userVol;
+        this.nodes.master.gain.setTargetAtTime(Math.max(0.0001, target), this.a.currentTime, 0.3);
+      } catch (e) { /* ignore */ }
+    }
   }
 
   start() {
@@ -57,7 +68,7 @@ export class Music {
       this.nodes = { master, filter, droneGain, padGain, d: [d1, d2], p: [p1, p2, p3], lfo, lfoGain };
       this.setFloor(this.floor);
       [d1, d2, p1, p2, p3, lfo].forEach(o => o.start());
-      master.gain.setTargetAtTime(MOODS[this.mood].master, a.currentTime, 3);
+      master.gain.setTargetAtTime(Math.max(0.0001, MOODS[this.mood].master * this.userVol), a.currentTime, 3);
       this.on = true;
     } catch (e) { /* audio unavailable */ }
   }
@@ -86,9 +97,9 @@ export class Music {
     const n = this.nodes;
     n.filter.frequency.setTargetAtTime(m.cutoff, now, 0.4);
     n.padGain.gain.setTargetAtTime(m.pad, now, 0.6);
-    n.master.gain.setTargetAtTime(m.master, now, 1.2);
+    n.master.gain.setTargetAtTime(Math.max(0.0001, m.master * this.userVol), now, 1.2);
     // heartbeat
-    if (m.beat > 0) {
+    if (m.beat > 0 && this.userVol > 0) {
       this.beatTimer -= dt;
       if (this.beatTimer <= 0) {
         this.beatTimer = m.beat;

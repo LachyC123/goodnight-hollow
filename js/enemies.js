@@ -29,6 +29,17 @@ class Enemy {
     this.bob = true;                          // gentle idle sway
     this.bobPhase = Math.random() * Math.PI * 2;
     this.stun = 0;                            // brief flinch after a hit (non-bosses)
+    this.elite = false;
+    this.scale = 1;
+  }
+  // a rarer, meaner variant: bigger, far tougher, a red aura, richer drops
+  makeElite() {
+    this.elite = true;
+    this.hp = Math.ceil(this.hp * 2.5);
+    this.maxHp = this.hp;
+    this.scale = 1.4;
+    this.w = Math.round(this.w * 1.3);
+    this.h = Math.round(this.h * 1.3);
   }
   hit(dmg, from) {
     if (this.dead || !this.touchable) return;
@@ -56,6 +67,13 @@ class Enemy {
     Sfx.enemyDie();
     this.game.puff(this.x, this.y, '#55506a');
     this.game.sparks(this.x, this.y, '#ffd0a0', 12);
+    if (this.elite) {
+      // the house paid extra to make this one; it pays out extra too
+      this.game.sparks(this.x, this.y, '#b03a48', 16);
+      this.game.shake(4, 0.2);
+      this.game.pickups.push({ kind: 'flame', x: this.x, y: this.y });
+      this.game.pickups.push({ kind: 'thread', x: this.x + 8, y: this.y });
+    }
   }
   update(dt, room, player) {}
   // a throbbing red ring on the floor while winding up to strike. Drawn from the
@@ -76,13 +94,26 @@ class Enemy {
   drawSprite(ctx, ox, oy, spr) {
     const b = this.bob ? Math.sin(performance.now() / 320 + this.bobPhase) * 1.1 : 0;
     const cx = ox + this.x, baseY = oy + this.y + 4 + b;   // feet baseline
-    if (this.flash > 0) {
-      // white hit-flash + a quick scale pop, both anchored at the feet
-      const s = 1 + this.flash * 1.8;
+    // elite aura — a pulsing red glow that marks the meaner variant
+    if (this.elite) {
+      const h = spr.height * this.scale;
+      const cy = baseY - h * 0.45, r = h * 1.0;
+      const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 220 + this.bobPhase);
       ctx.save();
-      ctx.filter = 'brightness(3)';
+      ctx.globalCompositeOperation = 'lighter';
+      const g = ctx.createRadialGradient(cx, cy, 1, cx, cy, r);
+      g.addColorStop(0, `rgba(190,44,64,${0.22 + 0.14 * pulse})`);
+      g.addColorStop(1, 'rgba(190,44,64,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+      ctx.restore();
+    }
+    const sc = this.scale * (this.flash > 0 ? 1 + this.flash * 1.8 : 1);
+    if (this.flash > 0 || this.scale !== 1) {
+      ctx.save();
+      if (this.flash > 0) ctx.filter = 'brightness(3)';
       ctx.translate(cx, baseY);
-      ctx.scale(s, s);
+      ctx.scale(sc, sc);
       ctx.drawImage(spr, -spr.width / 2, -spr.height);
       ctx.restore();
     } else {

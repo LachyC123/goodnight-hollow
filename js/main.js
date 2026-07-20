@@ -18,6 +18,7 @@ import { HUB_OBJECTS, hubObjectPos } from './hub.js';
 import { awakeChildren, childPos } from './children.js';
 import { PROLOGUE, CODEX, MEMORY_LORE } from './lore.js';
 import { Music } from './music.js';
+import { setSfxVolume } from './audio.js';
 import {
   Atmosphere, fxFor, drawShadow, drawLightPools, drawFlames, drawChestFlame,
   drawVignette, drawGrade, drawGrain, drawDanger, drawHeatHaze,
@@ -80,6 +81,9 @@ class Game {
     this.floaters = [];       // floating damage numbers
     this.bossIntro = null;    // cinematic boss title-card
     this.music = new Music(); // adaptive ambient score
+    this.pauseSel = 0;
+    this.prevState = 'run';
+    this.applyAudioSettings();
     this.setupDorm();
   }
 
@@ -410,6 +414,7 @@ class Game {
       case 'finale': this.updateEnd(dt); break;
       case 'cutscene': this.updateCutscene(dt); break;
       case 'codex': this.updateCodex(dt); break;
+      case 'pause': this.updatePause(dt); break;
     }
     Input.endFrame();
   }
@@ -456,6 +461,46 @@ class Game {
         this.cutscene = null;
         if (done) done();
       }
+    }
+  }
+
+  // ---------- pause & audio settings ----------
+  applyAudioSettings() {
+    const map = [0, 0.4, 1];
+    const s = this.save.settings || { musicVol: 2, sfxVol: 2 };
+    setSfxVolume(map[s.sfxVol] ?? 1);
+    this.music.setUserVolume(map[s.musicVol] ?? 1);
+  }
+  enterPause(prev) { this.prevState = prev; this.pauseSel = 0; this.state = 'pause'; Sfx.talk(); }
+  pauseOptions() {
+    const lbl = ['Off', 'Low', 'Full'];
+    return [
+      { id: 'resume', name: 'RESUME' },
+      { id: 'music', name: `MUSIC   ${lbl[this.save.settings.musicVol]}` },
+      { id: 'sfx', name: `SOUND   ${lbl[this.save.settings.sfxVol]}` },
+      { id: 'title', name: 'RETURN TO TITLE' },
+    ];
+  }
+  adjustSetting(id, dir) {
+    if (id === 'music') this.save.settings.musicVol = (this.save.settings.musicVol + dir + 3) % 3;
+    else if (id === 'sfx') this.save.settings.sfxVol = (this.save.settings.sfxVol + dir + 3) % 3;
+    else return;
+    this.applyAudioSettings();
+    this.persist();
+    Sfx.talk();
+  }
+  updatePause(dt) {
+    const opts = this.pauseOptions();
+    if (Input.wasPressed('Escape', 'KeyP')) { this.state = this.prevState; Sfx.talk(); return; }
+    if (Input.wasPressed('KeyW', 'ArrowUp')) { this.pauseSel = (this.pauseSel + opts.length - 1) % opts.length; Sfx.talk(); }
+    if (Input.wasPressed('KeyS', 'ArrowDown')) { this.pauseSel = (this.pauseSel + 1) % opts.length; Sfx.talk(); }
+    const o = opts[this.pauseSel];
+    if (Input.wasPressed('KeyA', 'ArrowLeft')) this.adjustSetting(o.id, -1);
+    if (Input.wasPressed('KeyD', 'ArrowRight')) this.adjustSetting(o.id, 1);
+    if (Input.confirm()) {
+      if (o.id === 'resume') { this.state = this.prevState; Sfx.talk(); }
+      else if (o.id === 'music' || o.id === 'sfx') this.adjustSetting(o.id, 1);
+      else if (o.id === 'title') { this.run = null; this.state = 'title'; this.titleFlicker = 0; Sfx.bell(); }
     }
   }
 
@@ -515,6 +560,7 @@ class Game {
 
   updateDorm(dt) {
     this.updateHubAmbience(dt);
+    if (Input.wasPressed('Escape', 'KeyP')) { this.enterPause('dorm'); return; }
     if (this.dialogue.active) { this.dialogue.update(dt); return; }
     this.player.update(dt, this.room);
     // talk to Elsie
@@ -655,6 +701,7 @@ class Game {
   }
 
   updateRun(dt) {
+    if (Input.wasPressed('Escape', 'KeyP')) { this.enterPause('run'); return; }
     if (this.bossIntro) { this.tickBossIntro(dt); return; }  // hold the room for the title-card
     if (this.dialogue.active) { this.dialogue.update(dt); return; }
     this.run.timeElapsed += dt;
@@ -1138,6 +1185,7 @@ class Game {
     if (this.state === 'pretendChoice') this.drawPretendChoice();
     if (this.state === 'cradle') this.drawCradle();
     if (this.state === 'codex') this.drawCodex();
+    if (this.state === 'pause') this.drawPause();
     if (this.state === 'memoryScene') this.drawMemoryScene();
     if (this.state === 'death') this.drawDeath();
     this.dialogue.draw(ctx, W, H);
@@ -1500,6 +1548,35 @@ class Game {
     }
     ctx.fillStyle = '#55506a';
     ctx.fillText('[A]/[D] choose · [ENTER] believe', W / 2, 195);
+    ctx.textAlign = 'left';
+  }
+
+  drawPause() {
+    ctx.fillStyle = 'rgba(6,4,10,0.82)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffe08a';
+    ctx.font = '12px monospace';
+    ctx.fillText('PAUSED', W / 2, 66);
+    const opts = this.pauseOptions();
+    for (let i = 0; i < opts.length; i++) {
+      const y = 96 + i * 26, sel = this.pauseSel === i;
+      ctx.fillStyle = sel ? '#322d44' : '#1c1626';
+      ctx.fillRect(W / 2 - 110, y - 13, 220, 22);
+      ctx.strokeStyle = sel ? '#ffe08a' : '#55506a';
+      ctx.strokeRect(W / 2 - 109.5, y - 12.5, 219, 21);
+      ctx.fillStyle = sel ? '#e8e0d8' : '#b8b0a8';
+      ctx.font = '9px monospace';
+      ctx.fillText(opts[i].name, W / 2, y + 1);
+      if (sel && (opts[i].id === 'music' || opts[i].id === 'sfx')) {
+        ctx.fillStyle = '#7a6a92';
+        ctx.font = '7px monospace';
+        ctx.fillText('‹ ›', W / 2 + 96, y + 1);
+      }
+    }
+    ctx.fillStyle = '#55506a';
+    ctx.font = '7px monospace';
+    ctx.fillText('[W/S] move   [A/D] adjust   [E] select   [ESC/P] resume', W / 2, H - 16);
     ctx.textAlign = 'left';
   }
 
