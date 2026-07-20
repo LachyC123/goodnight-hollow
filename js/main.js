@@ -16,6 +16,9 @@ import { StoryManager } from './story.js';
 import { DialogueManager, ELSIE_FIRST_WAKE, nannyIntroLines, NANNY_DEFEAT_LINES } from './storyDialogue.js';
 import { HUB_OBJECTS, hubObjectPos } from './hub.js';
 import { awakeChildren, childPos } from './children.js';
+import { PROLOGUE, CODEX, MEMORY_LORE } from './lore.js';
+import { Music } from './music.js';
+import { setSfxVolume } from './audio.js';
 import {
   Atmosphere, fxFor, drawShadow, drawLightPools, drawFlames, drawChestFlame,
   drawVignette, drawGrade, drawGrain, drawDanger, drawHeatHaze,
@@ -24,6 +27,19 @@ import {
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 ctx.imageSmoothingEnabled = false;
+
+// The house muttering in the Dormitory — surfaces more as houseAwareness rises.
+const HUB_WHISPERS = [
+  'good children do not remember',
+  'the door is only locked from the inside',
+  'we kept every one of you',
+  'go back to bed, little candle',
+  'you are counting. so are we.',
+  'morning is a rule, not a promise',
+  'she made you to leave. you keep staying.',
+  'the fourth floor is not to be discussed',
+  'louder. we like it when you are loud.',
+];
 
 // Per-floor ambient flecks: {spawn interval, x-jitter, fall speed (+down/-up), life, colour, size, additive}
 const AMBIENT = {
@@ -58,6 +74,16 @@ class Game {
     this.slowmoT = 0;         // brief bullet-time on a perfect dodge
     this.combo = 0; this.comboT = 0; this.comboPop = 0;
     this.impacts = [];        // expanding impact rings
+    this.cutscene = null;     // active lore cutscene
+    this.codexSel = 0;        // selected codex entry
+    this.whisperT = 0; this.whisper = null; // hub ambient whispers
+    this.creakT = 3;          // hub ambient sound timer
+    this.floaters = [];       // floating damage numbers
+    this.bossIntro = null;    // cinematic boss title-card
+    this.music = new Music(); // adaptive ambient score
+    this.pauseSel = 0;
+    this.prevState = 'run';
+    this.applyAudioSettings();
     this.setupDorm();
   }
 
@@ -75,6 +101,19 @@ class Game {
   // the night about to be (or being) attempted
   get currentNight() { return this.run ? this.run.night : Math.min(this.save.nightsCleared + 1, LAST_NIGHT); }
   get nightData() { return NIGHTS[this.currentNight]; }
+
+  // difficulty scaling — a floor of pressure per night, plus everything the
+  // house has learned to fear (houseAwareness). Read by spawnEnemies.
+  difficulty() {
+    const aw = this.story.awareness;                 // 0..100
+    const nightFloor = (this.currentNight - 1) * 0.12; // later floors are harder
+    const t = aw / 100;
+    return {
+      hp: 1 + nightFloor + t * 0.8,                  // up to ~2x enemy stitches
+      count: (aw >= 70 ? 2 : aw >= 35 ? 1 : 0),      // extra pressure when awake
+      aware: aw,
+    };
+  }
 
   // ---------- setup ----------
   setupDorm() {
@@ -118,13 +157,10 @@ class Game {
       Sfx.doorLock();
       if (this.room.type === 'boss') {
         this.story.onBossReached();
-        if (this.nightData.bossKind === 'nanny') {
-          this.dialogue.say(nannyIntroLines(this.story));
-        } else {
-          this.dialogue.say([
-            { who: this.nightData.boss, text: this.nightData.bossIntro },
-          ]);
-        }
+        const lines = this.nightData.bossKind === 'nanny'
+          ? nannyIntroLines(this.story)
+          : [{ who: this.nightData.boss, text: this.nightData.bossIntro }];
+        this.startBossIntro(this.nightData.boss, this.nightData.floor, lines);
         Sfx.bossRoar();
       }
     } else {
@@ -249,10 +285,53 @@ class Game {
     this.comboPop = 0.16;
     this.story.onCombo(this.combo);
   }
+  // steer the adaptive score toward the current situation
+  updateMusic(dt) {
+    if (!this.music.on) return;
+    let mood = 'calm';
+    if (this.state === 'run') {
+      const boss = this.enemies.some(e => e.isBoss && !e.dead);
+      const fighting = this.enemies.some(e => !e.dead);
+      mood = boss ? 'boss' : (fighting ? 'combat' : 'explore');
+      if (!this.player.dead && this.player.stitches <= 2) mood = 'danger';
+      if (this.music.floor !== this.currentNight) this.music.setFloor(this.currentNight);
+    } else if (this.state === 'title' || this.state === 'cutscene') {
+      mood = 'calm';
+    }
+    this.music.setMood(mood);
+    this.music.update(dt);
+  }
+
+  // floating combat number that rises and fades
+  damageNumber(x, y, amount, kind = 'hit') {
+    const n = Math.max(1, Math.round(amount));
+    const style = kind === 'crit' ? { c: '#ffb347', s: 11, txt: n }
+      : kind === 'parry' ? { c: '#ffe08a', s: 8, txt: n }
+      : { c: '#e8e0d8', s: 8, txt: n };
+    this.floaters.push({
+      x: x + (Math.random() - 0.5) * 6, y: y - 8, vy: -34,
+      t: 0.7, text: '' + style.txt, color: style.c, size: style.s,
+    });
+  }
+
+  // ---------- cinematic boss intro ----------
+  startBossIntro(name, floor, lines) {
+    this.bossIntro = { name, floor, lines, t: 0, dur: 2.4 };
+    this.shake(6, 0.5);
+  }
+  tickBossIntro(dt) {
+    const b = this.bossIntro;
+    b.t += dt;
+    if (b.t >= b.dur) {
+      this.dialogue.say(b.lines);
+      this.bossIntro = null;
+    }
+  }
+
   // a perfectly-timed dodge: bullet-time, flame reward, and a cool spark burst
   onPerfectDodge(p) {
     this.slowmoT = Math.max(this.slowmoT, 0.3);
-    p.gainFlame(20);
+    p.gainFlame(12);
     this.sparks(p.x, p.y - 4, '#bfe6ff', 12);
     this.impacts.push({ x: p.x, y: p.y, t: 0.28, max: 0.28, kill: false });
     Sfx.perfectDodge();
@@ -308,6 +387,9 @@ class Game {
     if (this.comboT > 0) { this.comboT -= dt; if (this.comboT <= 0) this.combo = 0; }
     for (const im of this.impacts) im.t -= dt;
     if (this.impacts.length) this.impacts = this.impacts.filter(im => im.t > 0);
+    for (const f of this.floaters) { f.y += f.vy * dt; f.vy += 26 * dt; f.t -= dt; }
+    if (this.floaters.length) this.floaters = this.floaters.filter(f => f.t > 0);
+    this.updateMusic(dt);
     this.atmosphere.update(dt);
     if (this.state === 'run' || this.state === 'dorm') this.ambientEmit(dt);
     for (const p of this.particles) {
@@ -330,6 +412,9 @@ class Game {
       case 'death': this.updateDeath(dt); break;
       case 'end': this.updateEnd(dt); break;
       case 'finale': this.updateEnd(dt); break;
+      case 'cutscene': this.updateCutscene(dt); break;
+      case 'codex': this.updateCodex(dt); break;
+      case 'pause': this.updatePause(dt); break;
     }
     Input.endFrame();
   }
@@ -337,15 +422,127 @@ class Game {
   updateTitle(dt) {
     this.titleFlicker += dt;
     if (Input.confirm()) {
-      Sfx.unlock(); Sfx.bell();
-      this.startFade(() => {
-        this.setupDorm();
-        this.state = 'dorm';
-        if (!this.save.metElsie) {
-          setTimeout(() => this.introSequence(), 400);
-        }
-      });
+      Sfx.unlock(); this.music.start(); Sfx.bell();
+      // first launch: play the prologue so the story has a foothold
+      if (!this.story.flag('sawPrologue')) {
+        this.startCutscene(PROLOGUE, () => {
+          this.story.setFlag('sawPrologue', true);
+          this.enterDormFromTitle();
+        });
+      } else {
+        this.enterDormFromTitle();
+      }
     }
+  }
+
+  enterDormFromTitle() {
+    this.startFade(() => {
+      this.setupDorm();
+      this.state = 'dorm';
+      if (!this.save.metElsie) setTimeout(() => this.introSequence(), 400);
+    });
+  }
+
+  // ---------- cutscene (reusable lore sequences) ----------
+  startCutscene(beats, onDone) {
+    this.cutscene = { beats, page: 0, onDone, t: 0 };
+    this.state = 'cutscene';
+  }
+  updateCutscene(dt) {
+    const c = this.cutscene;
+    if (!c) { this.state = 'title'; return; }
+    c.t += dt;
+    if (Input.confirm() && c.t > 0.25) {
+      c.page++;
+      c.t = 0;
+      Sfx.talk();
+      if (c.page >= c.beats.length) {
+        const done = c.onDone;
+        this.cutscene = null;
+        if (done) done();
+      }
+    }
+  }
+
+  // ---------- pause & audio settings ----------
+  applyAudioSettings() {
+    const map = [0, 0.4, 1];
+    const s = this.save.settings || { musicVol: 2, sfxVol: 2 };
+    setSfxVolume(map[s.sfxVol] ?? 1);
+    this.music.setUserVolume(map[s.musicVol] ?? 1);
+  }
+  enterPause(prev) { this.prevState = prev; this.pauseSel = 0; this.state = 'pause'; Sfx.talk(); }
+  pauseOptions() {
+    const lbl = ['Off', 'Low', 'Full'];
+    return [
+      { id: 'resume', name: 'RESUME' },
+      { id: 'music', name: `MUSIC   ${lbl[this.save.settings.musicVol]}` },
+      { id: 'sfx', name: `SOUND   ${lbl[this.save.settings.sfxVol]}` },
+      { id: 'title', name: 'RETURN TO TITLE' },
+    ];
+  }
+  adjustSetting(id, dir) {
+    if (id === 'music') this.save.settings.musicVol = (this.save.settings.musicVol + dir + 3) % 3;
+    else if (id === 'sfx') this.save.settings.sfxVol = (this.save.settings.sfxVol + dir + 3) % 3;
+    else return;
+    this.applyAudioSettings();
+    this.persist();
+    Sfx.talk();
+  }
+  updatePause(dt) {
+    const opts = this.pauseOptions();
+    if (Input.wasPressed('Escape', 'KeyP')) { this.state = this.prevState; Sfx.talk(); return; }
+    if (Input.wasPressed('KeyW', 'ArrowUp')) { this.pauseSel = (this.pauseSel + opts.length - 1) % opts.length; Sfx.talk(); }
+    if (Input.wasPressed('KeyS', 'ArrowDown')) { this.pauseSel = (this.pauseSel + 1) % opts.length; Sfx.talk(); }
+    const o = opts[this.pauseSel];
+    if (Input.wasPressed('KeyA', 'ArrowLeft')) this.adjustSetting(o.id, -1);
+    if (Input.wasPressed('KeyD', 'ArrowRight')) this.adjustSetting(o.id, 1);
+    if (Input.confirm()) {
+      if (o.id === 'resume') { this.state = this.prevState; Sfx.talk(); }
+      else if (o.id === 'music' || o.id === 'sfx') this.adjustSetting(o.id, 1);
+      else if (o.id === 'title') { this.run = null; this.state = 'title'; this.titleFlicker = 0; Sfx.bell(); }
+    }
+  }
+
+  // ---------- lore codex ----------
+  openCodex() { this.codexSel = 0; this.state = 'codex'; }
+  codexEntries() {
+    const s = this.story.state;
+    const out = CODEX.map(e => ({
+      title: e.title,
+      locked: !(e.always || (e.unlock && e.unlock({ ...s, nightsCleared: this.save.nightsCleared }))),
+      body: e.body,
+    }));
+    // per-floor memories, legible once found
+    for (let n = 1; n <= LAST_NIGHT; n++) {
+      const seen = this.save.memoriesSeen && this.save.memoriesSeen[n];
+      const m = MEMORY_LORE[n];
+      out.push({ title: m.title, locked: !seen, body: m.body });
+    }
+    return out;
+  }
+  updateCodex(dt) {
+    const entries = this.codexEntries();
+    if (Input.dodge() || Input.wasPressed('Escape')) { this.state = 'dorm'; return; }
+    if (Input.wasPressed('KeyS', 'ArrowDown')) { this.codexSel = Math.min(entries.length - 1, this.codexSel + 1); Sfx.talk(); }
+    if (Input.wasPressed('KeyW', 'ArrowUp')) { this.codexSel = Math.max(0, this.codexSel - 1); Sfx.talk(); }
+    if (Input.interact()) { this.state = 'dorm'; }
+  }
+
+  // Dormitory ambience: creaks and the house's whispers, both keyed to how
+  // awake (houseAwareness) the house is.
+  updateHubAmbience(dt) {
+    const aw = this.story.awareness;
+    this.creakT -= dt;
+    if (this.creakT <= 0) { this.creakT = 7 + Math.random() * 11; Sfx.creak(); }
+    this.whisperT -= dt;
+    if (this.whisperT <= 0) {
+      this.whisperT = Math.max(4, 12 - aw * 0.06) + Math.random() * 6;
+      if (aw >= 12 && !this.whisper && Math.random() < 0.35 + aw / 250) {
+        this.whisper = { text: HUB_WHISPERS[Math.floor(Math.random() * HUB_WHISPERS.length)], t: 3.4 };
+      }
+    }
+    if (this.whisper) { this.whisper.t -= dt; if (this.whisper.t <= 0) this.whisper = null; }
   }
 
   introSequence() {
@@ -362,6 +559,8 @@ class Game {
   }
 
   updateDorm(dt) {
+    this.updateHubAmbience(dt);
+    if (Input.wasPressed('Escape', 'KeyP')) { this.enterPause('dorm'); return; }
     if (this.dialogue.active) { this.dialogue.update(dt); return; }
     this.player.update(dt, this.room);
     // talk to Elsie
@@ -412,6 +611,40 @@ class Game {
     const lines = picked ? [...picked.lines] : [];
     lines.push(...this.elsieNightFlavour());
     this.dialogue.say(lines, () => { if (picked) picked.apply(); });
+  }
+
+  // does an NPC have a story-critical beat waiting? (priority > 10 = not idle
+  // chatter — matches talkToElsie's own cutoff). Used to flag who to talk to.
+  elsieHasNews() {
+    if (this.save.endingSeen) return false;
+    const p = this.storyDialogue.pick();
+    return !!(p && p.priority > 10);
+  }
+  childHasNews(c) {
+    if (this.save.endingSeen) return false;
+    if (!this.childDialogues[c.id]) this.childDialogues[c.id] = new DialogueManager(this.story, c.dialogue);
+    const p = this.childDialogues[c.id].pick();
+    return !!(p && p.priority > 10);
+  }
+  // the single clearest next step, shown as a gentle objective line
+  objectiveHint() {
+    if (!this.bellRung || this.dialogue.active) return null;
+    if (this.elsieHasNews()) return 'Elsie is waiting to speak — talk to her.';
+    for (const c of awakeChildren(this.save)) if (this.childHasNews(c)) return 'Someone new has something to tell you.';
+    if (this.room.doorsOpen) return 'When you are ready, step through the door to descend.';
+    return null;
+  }
+  drawNewsMark(x, y) {
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.font = '11px monospace';
+    ctx.globalAlpha = 0.8 + 0.2 * Math.sin(performance.now() / 150);
+    ctx.fillStyle = '#14101c';
+    ctx.fillText('!', x + 1, y + 1);
+    ctx.fillStyle = '#ffe08a';
+    ctx.fillText('!', x, y);
+    ctx.restore();
+    ctx.textAlign = 'left';
   }
 
   talkToChild(c) {
@@ -468,6 +701,8 @@ class Game {
   }
 
   updateRun(dt) {
+    if (Input.wasPressed('Escape', 'KeyP')) { this.enterPause('run'); return; }
+    if (this.bossIntro) { this.tickBossIntro(dt); return; }  // hold the room for the title-card
     if (this.dialogue.active) { this.dialogue.update(dt); return; }
     this.run.timeElapsed += dt;
     this.player.update(dt, this.room);
@@ -746,6 +981,7 @@ class Game {
     if (this.state === 'title') { this.drawTitle(); this.drawFade(); return; }
     if (this.state === 'end') { this.drawEnd(); this.drawFade(); return; }
     if (this.state === 'finale') { this.drawFinale(); this.drawFade(); return; }
+    if (this.state === 'cutscene') { this.drawCutscene(); this.drawFade(); return; }
 
     let ox = OX, oy = OY;
     if (this.shakeMag > 0) {
@@ -755,7 +991,7 @@ class Game {
 
     drawRoom(ctx, this.room, ox, oy);
 
-    // memory spot glow
+    // memory spot glow + a legible cue so the story beat isn't walked past
     if (this.room.type === 'memory' && !this.room.memorySpot.seen) {
       const s = this.room.memorySpot;
       ctx.save();
@@ -765,6 +1001,15 @@ class Game {
       ctx.arc(ox + s.x, oy + s.y, s.r, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
+      if (!this.dialogue.active) {
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.font = '7px monospace';
+        ctx.fillStyle = `rgba(255,224,138,${0.5 + 0.3 * Math.sin(performance.now() / 400)})`;
+        ctx.fillText('a memory lingers here — step into the light', ox + s.x, oy + s.y - s.r - 6);
+        ctx.restore();
+        ctx.textAlign = 'left';
+      }
     }
 
     // pickups
@@ -830,7 +1075,8 @@ class Game {
         ctx.drawImage(SPR.elsie, Math.round(ox + this.elsie.x - 5), Math.round(oy + this.elsie.y - 10 + b));
       } else if (e.drawChild) {
         const b = Math.sin(performance.now() / 500 + e.px) * 0.7;
-        ctx.drawImage(SPR[e.drawChild.spr], Math.round(ox + e.px - 5), Math.round(oy + e.py - 10 + b));
+        const sx = Math.sin(performance.now() / 900 + e.px * 0.7) * 0.6;
+        ctx.drawImage(SPR[e.drawChild.spr], Math.round(ox + e.px - 5 + sx), Math.round(oy + e.py - 10 + b));
       } else if (e === this.player) {
         e.draw(ctx, ox, oy);
         if (!this.player.dead) drawChestFlame(ctx, ox + e.x, oy + e.y - 3);
@@ -889,6 +1135,33 @@ class Game {
       : 0;
     drawDanger(ctx, this.damageFlash, this.player.dead ? 0 : lowFrac);
 
+    // the more awake the house, the more it bleeds into the Dormitory edges
+    if (this.room.type === 'dorm') {
+      const aw = this.story.awareness;
+      if (aw > 0) {
+        const a = Math.min(0.22, aw / 100 * 0.22) * (0.85 + 0.15 * Math.sin(performance.now() / 700));
+        const g = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, W * 0.62);
+        g.addColorStop(0, 'rgba(120,20,32,0)');
+        g.addColorStop(1, `rgba(130,22,36,${a})`);
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, W, H);
+      }
+    }
+
+    // floating damage numbers
+    for (const f of this.floaters) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, f.t * 2.2);
+      ctx.font = `${f.size}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#14101c';
+      ctx.fillText(f.text, ox + f.x + 1, oy + f.y + 1);
+      ctx.fillStyle = f.color;
+      ctx.fillText(f.text, ox + f.x, oy + f.y);
+      ctx.restore();
+    }
+    ctx.textAlign = 'left';
+
     // floating combo counter above Mallow, punching on each new hit
     if (this.combo >= 2 && this.state === 'run' && !this.player.dead) {
       ctx.save();
@@ -908,8 +1181,11 @@ class Game {
 
     this.drawHud();
 
+    if (this.bossIntro) this.drawBossIntro();
     if (this.state === 'pretendChoice') this.drawPretendChoice();
     if (this.state === 'cradle') this.drawCradle();
+    if (this.state === 'codex') this.drawCodex();
+    if (this.state === 'pause') this.drawPause();
     if (this.state === 'memoryScene') this.drawMemoryScene();
     if (this.state === 'death') this.drawDeath();
     this.dialogue.draw(ctx, W, H);
@@ -1006,6 +1282,27 @@ class Game {
         }
       }
     }
+    // story markers: a bright "!" over anyone with a new beat to deliver, so
+    // the player always knows who advances the story
+    const nb = Math.sin(performance.now() / 220) * 1.5;
+    if (this.elsieHasNews() && dist(this.player, this.elsie) >= 22) {
+      this.drawNewsMark(ox + this.elsie.x, oy + this.elsie.y - 22 + nb);
+    }
+    for (const c of awakeChildren(this.save)) {
+      const p = childPos(c);
+      if (this.childHasNews(c) && dist(this.player, p) >= 22) this.drawNewsMark(ox + p.x, oy + p.y - 22 + nb);
+    }
+    // one clear objective line
+    const hint = this.objectiveHint();
+    if (hint) {
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.font = '7px monospace';
+      ctx.fillStyle = `rgba(255,224,138,${0.45 + 0.25 * Math.sin(performance.now() / 600)})`;
+      ctx.fillText(hint, W / 2, H - 22);
+      ctx.restore();
+      ctx.textAlign = 'left';
+    }
     if (this.room.doorsOpen && !this.dialogue.active) {
       ctx.fillStyle = 'rgba(255,224,138,0.7)';
       ctx.fillText('the door is open', ox + (COLS - 8) * TS, oy + 5.6 * TS);
@@ -1013,6 +1310,31 @@ class Game {
     if (!this.bellRung) {
       ctx.fillStyle = 'rgba(232,224,216,0.4)';
       ctx.fillText('3:32 AM', OX + 4, OY - 6);
+    }
+    // the house whispering (fades in/out, keyed to houseAwareness)
+    if (this.whisper) {
+      const a = Math.min(1, this.whisper.t) * Math.min(1, (3.4 - this.whisper.t) * 1.4 + 0.2);
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.font = '8px monospace';
+      ctx.fillStyle = `rgba(176,58,72,${Math.max(0, a) * 0.6})`;
+      ctx.fillText(this.whisper.text, W / 2, H - 42);
+      ctx.restore();
+      ctx.textAlign = 'left';
+    }
+    // faint idle emotes above the woken children — the hub breathing
+    for (const c of awakeChildren(this.save)) {
+      const cyc = (performance.now() / 1000 + c.tx * 3) % 11;
+      if (cyc < 1.4) {
+        const p = childPos(c);
+        const em = { oren: '!', miri: '~', pip: 'ha', jude: '...' }[c.id] || '.';
+        ctx.save();
+        ctx.globalAlpha = Math.sin((cyc / 1.4) * Math.PI) * 0.6;
+        ctx.fillStyle = '#9fd8c0';
+        ctx.font = '7px monospace';
+        ctx.fillText(em, ox + p.x - 3, oy + p.y - 20);
+        ctx.restore();
+      }
     }
   }
 
@@ -1071,8 +1393,38 @@ class Game {
       const nlabel = `NIGHT ${this.currentNight}`;
       ctx.fillStyle = '#7a6a92';
       ctx.fillText(nlabel, W - 8 - ctx.measureText(nlabel).width, 18);
+      // run-progress pips: one per planned room, filled as you descend
+      if (this.run) {
+        const rooms = this.run.rooms, px0 = W - 8 - rooms.length * 8;
+        for (let i = 0; i < rooms.length; i++) {
+          const rx = px0 + i * 8;
+          const cur = i === this.run.roomIndex;
+          const done = i < this.run.roomIndex;
+          const isBoss = rooms[i].type === 'boss', isMem = rooms[i].type === 'memory';
+          ctx.fillStyle = cur ? '#ffe08a' : done ? '#7a6a92' : '#3a3450';
+          if (isBoss) { ctx.fillRect(rx, 22, 6, 6); }        // boss = square
+          else {
+            ctx.beginPath();
+            ctx.arc(rx + 3, 25, isMem ? 1.6 : 2.5, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      }
     } else {
       ctx.fillText('THE DORMITORY', W - 8 - ctx.measureText('THE DORMITORY').width, 9);
+    }
+    // house-awareness meter — the eye that widens as the house wakes
+    const aw = this.story.awareness;
+    if (aw > 0) {
+      const mx = W / 2 - 40, my = 6;
+      ctx.fillStyle = '#7a6a92';
+      ctx.font = '6px monospace';
+      ctx.fillText('THE HOUSE', mx, my + 4);
+      ctx.fillStyle = '#14101c';
+      ctx.fillRect(mx + 40, my, 40, 4);
+      ctx.fillStyle = `rgba(176,58,72,${0.6 + 0.4 * Math.sin(performance.now() / 500)})`;
+      ctx.fillRect(mx + 40, my, Math.round(40 * aw / 100), 4);
+      ctx.font = '7px monospace';
     }
     // boss bar
     const boss = this.enemies.find(e => e.isBoss);
@@ -1196,6 +1548,163 @@ class Game {
     }
     ctx.fillStyle = '#55506a';
     ctx.fillText('[A]/[D] choose · [ENTER] believe', W / 2, 195);
+    ctx.textAlign = 'left';
+  }
+
+  drawPause() {
+    ctx.fillStyle = 'rgba(6,4,10,0.82)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffe08a';
+    ctx.font = '12px monospace';
+    ctx.fillText('PAUSED', W / 2, 66);
+    const opts = this.pauseOptions();
+    for (let i = 0; i < opts.length; i++) {
+      const y = 96 + i * 26, sel = this.pauseSel === i;
+      ctx.fillStyle = sel ? '#322d44' : '#1c1626';
+      ctx.fillRect(W / 2 - 110, y - 13, 220, 22);
+      ctx.strokeStyle = sel ? '#ffe08a' : '#55506a';
+      ctx.strokeRect(W / 2 - 109.5, y - 12.5, 219, 21);
+      ctx.fillStyle = sel ? '#e8e0d8' : '#b8b0a8';
+      ctx.font = '9px monospace';
+      ctx.fillText(opts[i].name, W / 2, y + 1);
+      if (sel && (opts[i].id === 'music' || opts[i].id === 'sfx')) {
+        ctx.fillStyle = '#7a6a92';
+        ctx.font = '7px monospace';
+        ctx.fillText('‹ ›', W / 2 + 96, y + 1);
+      }
+    }
+    ctx.fillStyle = '#55506a';
+    ctx.font = '7px monospace';
+    ctx.fillText('[W/S] move   [A/D] adjust   [E] select   [ESC/P] resume', W / 2, H - 16);
+    ctx.textAlign = 'left';
+  }
+
+  drawBossIntro() {
+    const b = this.bossIntro;
+    const p = Math.min(1, b.t / b.dur);
+    // cinematic letterbox that slides in
+    const barH = 34 * Math.min(1, b.t * 4);
+    ctx.fillStyle = '#050308';
+    ctx.fillRect(0, 0, W, barH);
+    ctx.fillRect(0, H - barH, W, barH);
+    // darken the scene behind the card
+    ctx.fillStyle = `rgba(5,3,8,${0.5 * Math.min(1, b.t * 2)})`;
+    ctx.fillRect(0, barH, W, H - barH * 2);
+    ctx.save();
+    ctx.textAlign = 'center';
+    // floor kicker
+    const appear = Math.min(1, Math.max(0, (b.t - 0.3) * 2));
+    ctx.globalAlpha = appear;
+    ctx.fillStyle = '#7a6a92';
+    ctx.font = '8px monospace';
+    ctx.fillText(b.floor, W / 2, H / 2 - 22);
+    // the boss name, scaling in with a red underline
+    const s = 1 + (1 - appear) * 0.4;
+    ctx.save();
+    ctx.translate(W / 2, H / 2);
+    ctx.scale(s, s);
+    ctx.fillStyle = '#e8e0d8';
+    ctx.font = '16px monospace';
+    const pulse = 0.85 + 0.15 * Math.sin(performance.now() / 120);
+    ctx.globalAlpha = appear * pulse;
+    ctx.fillText(b.name, 0, 0);
+    ctx.restore();
+    // red rule under the name
+    ctx.globalAlpha = appear;
+    ctx.fillStyle = '#b03a48';
+    const uw = 120 * appear;
+    ctx.fillRect(W / 2 - uw / 2, H / 2 + 10, uw, 2);
+    ctx.restore();
+    ctx.textAlign = 'left';
+  }
+
+  drawCutscene() {
+    const c = this.cutscene;
+    ctx.fillStyle = '#08060d';
+    ctx.fillRect(0, 0, W, H);
+    this.atmosphere.draw(ctx, '#ffb861');
+    if (!c) return;
+    const beat = c.beats[Math.min(c.page, c.beats.length - 1)];
+    const app = Math.min(1, c.t * 1.6);   // each beat fades in
+    ctx.save();
+    ctx.globalAlpha = app;
+    ctx.textAlign = 'center';
+    // a small candle flame motif above the text
+    drawChestFlame(ctx, W / 2, 66);
+    ctx.fillStyle = '#ffe08a';
+    ctx.font = '9px monospace';
+    if (beat.title) ctx.fillText(beat.title, W / 2, 96);
+    ctx.fillStyle = '#e8e0d8';
+    ctx.font = '9px monospace';
+    const words = beat.text.split(' ');
+    let line = '', y = 128;
+    for (const w of words) {
+      const tl = line ? line + ' ' + w : w;
+      if (ctx.measureText(tl).width > 360) { ctx.fillText(line, W / 2, y); y += 14; line = w; }
+      else line = tl;
+    }
+    ctx.fillText(line, W / 2, y);
+    ctx.restore();
+    // page dots + prompt
+    const n = c.beats.length;
+    for (let i = 0; i < n; i++) {
+      ctx.fillStyle = i === c.page ? '#ffe08a' : '#3a3450';
+      ctx.fillRect(W / 2 - n * 4 + i * 8, 196, 4, 4);
+    }
+    ctx.fillStyle = '#55506a';
+    ctx.font = '7px monospace';
+    if (Math.floor(performance.now() / 500) % 2) ctx.fillText('[ENTER]', W / 2, 224);
+    ctx.textAlign = 'left';
+    drawVignette(ctx);
+  }
+
+  drawCodex() {
+    ctx.fillStyle = 'rgba(6,4,10,0.93)';
+    ctx.fillRect(0, 0, W, H);
+    const entries = this.codexEntries();
+    const sel = entries[this.codexSel];
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#ffe08a';
+    ctx.font = '10px monospace';
+    ctx.fillText('THE CANDLE\'S MEMORY', 24, 34);
+    ctx.fillStyle = '#7a6a92';
+    ctx.font = '7px monospace';
+    ctx.fillText('what Mallow has pieced together', 24, 46);
+    // left: list
+    ctx.font = '8px monospace';
+    for (let i = 0; i < entries.length; i++) {
+      const y = 66 + i * 15;
+      const e = entries[i];
+      if (i === this.codexSel) {
+        ctx.fillStyle = '#322d44';
+        ctx.fillRect(20, y - 9, 168, 13);
+      }
+      ctx.fillStyle = e.locked ? '#4a4560' : (i === this.codexSel ? '#ffe08a' : '#b8b0a8');
+      ctx.fillText(e.locked ? '— — —' : e.title, 26, y);
+    }
+    // right: body
+    const bx = 205, bw = W - bx - 20;
+    ctx.strokeStyle = '#3a3450';
+    ctx.strokeRect(bx - 0.5, 60.5, bw + 1, 150);
+    ctx.fillStyle = '#ffe08a';
+    ctx.font = '9px monospace';
+    ctx.fillText(sel.locked ? 'Not yet remembered' : sel.title, bx + 8, 78);
+    ctx.fillStyle = '#e8e0d8';
+    ctx.font = '8px monospace';
+    const body = sel.locked ? 'Find this floor\'s memory, or press deeper into the house, and it will come back to you.' : sel.body;
+    const words = body.split(' ');
+    let line = '', y = 96;
+    for (const w of words) {
+      const tl = line ? line + ' ' + w : w;
+      if (ctx.measureText(tl).width > bw - 16) { ctx.fillText(line, bx + 8, y); y += 12; line = w; }
+      else line = tl;
+    }
+    ctx.fillText(line, bx + 8, y);
+    ctx.fillStyle = '#55506a';
+    ctx.font = '7px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('[W/S] turn pages    [E] close', W / 2, H - 12);
     ctx.textAlign = 'left';
   }
 

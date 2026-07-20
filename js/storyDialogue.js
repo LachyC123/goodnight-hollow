@@ -169,6 +169,18 @@ export const ELSIE_DIALOGUE = [
     effects: { setFlags: { hasReceivedElsieRequest: true } },
   },
   {
+    id: 'elsie_house_awake',
+    speaker: 'Elsie',
+    priority: 20,
+    repeatable: false, // a one-time beat — repeating it would suppress pre-night guidance
+    condition: ({ state }) => (state.houseAwareness || 0) >= 40,
+    lines: [
+      ...['The house is louder lately.', 'It says your name in its sleep now. It didn\'t used to.',
+        'I think it\'s afraid of you.', 'I don\'t know if that\'s good.',
+        'Afraid things bite. Be careful it doesn\'t bite back harder.'].map(elsie),
+    ],
+  },
+  {
     id: 'elsie_pre_run_repeat',
     speaker: 'Elsie',
     priority: 10,

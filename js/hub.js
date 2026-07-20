@@ -12,6 +12,26 @@ import { TS } from './world.js';
 
 export const HUB_OBJECTS = [
   {
+    id: 'loreCodex',
+    tx: 5, ty: 6,
+    prompt: 'remember',
+    visible: () => true,
+    action(game) { game.openCodex(); },
+    draw(ctx, x, y) {
+      // a candle-lit book of what Mallow has pieced together
+      ctx.fillStyle = '#3a4a72';
+      ctx.fillRect(x, y + 2, 11, 7);
+      ctx.fillStyle = '#e8e0d8';
+      ctx.fillRect(x + 1, y + 3, 9, 5);
+      ctx.fillStyle = '#8a6a4a';
+      ctx.fillRect(x + 5, y + 3, 1, 5);
+      const flick = 0.6 + 0.4 * Math.sin(performance.now() / 150);
+      ctx.fillStyle = `rgba(255,179,71,${flick})`;
+      ctx.fillRect(x + 9, y - 2, 1, 3);
+    },
+    lines: [],
+  },
+  {
     id: 'candleCradle',
     tx: 2, ty: 5.2,
     prompt: 'tend',

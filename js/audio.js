@@ -6,7 +6,15 @@ function ac() {
   return ctx;
 }
 
+// shared context, so the music layer and SFX use one AudioContext
+export function audioContext() { return ac(); }
+
+// global SFX volume (0..1), set from the pause menu
+let sfxVol = 1;
+export function setSfxVolume(v) { sfxVol = Math.max(0, Math.min(1, v)); }
+
 function tone(freq, dur, type = 'square', vol = 0.08, slide = 0) {
+  if (sfxVol <= 0) return;
   try {
     const a = ac();
     const o = a.createOscillator();
@@ -14,7 +22,7 @@ function tone(freq, dur, type = 'square', vol = 0.08, slide = 0) {
     o.type = type;
     o.frequency.setValueAtTime(freq, a.currentTime);
     if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, freq + slide), a.currentTime + dur);
-    g.gain.setValueAtTime(vol, a.currentTime);
+    g.gain.setValueAtTime(vol * sfxVol, a.currentTime);
     g.gain.exponentialRampToValueAtTime(0.001, a.currentTime + dur);
     o.connect(g); g.connect(a.destination);
     o.start(); o.stop(a.currentTime + dur);
@@ -22,6 +30,7 @@ function tone(freq, dur, type = 'square', vol = 0.08, slide = 0) {
 }
 
 function noise(dur, vol = 0.06) {
+  if (sfxVol <= 0) return;
   try {
     const a = ac();
     const len = a.sampleRate * dur;
@@ -30,7 +39,7 @@ function noise(dur, vol = 0.06) {
     for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
     const s = a.createBufferSource();
     const g = a.createGain();
-    g.gain.value = vol;
+    g.gain.value = vol * sfxVol;
     s.buffer = buf;
     s.connect(g); g.connect(a.destination);
     s.start();
@@ -63,6 +72,8 @@ export const Sfx = {
   bell() { tone(1245, 0.9, 'sine', 0.07, -20); tone(830, 0.9, 'sine', 0.05, -10); },
   talk() { tone(440 + Math.random() * 120, 0.04, 'square', 0.03); },
   bossRoar() { tone(70, 0.7, 'sawtooth', 0.12, -30); noise(0.4, 0.08); },
+  // faint ambient house creak for the Dormitory
+  creak() { tone(80 + Math.random() * 40, 0.5, 'triangle', 0.03, -20); noise(0.2, 0.015); },
   explode() { noise(0.35, 0.12); tone(60, 0.4, 'sawtooth', 0.1, -30); },
   upgrade() { tone(523, 0.12, 'sine', 0.06); setTimeout(() => tone(659, 0.12, 'sine', 0.06), 110); setTimeout(() => tone(784, 0.2, 'sine', 0.06), 220); },
 };

@@ -31,6 +31,7 @@ export function defaultSave() {
     houseMemory: {},         // house learning system (future system)
     flags: {},               // misc one-off story flags
     story: defaultStoryState(), // the story system (js/story.js) owns this
+    settings: { musicVol: 2, sfxVol: 2 }, // 0 = off, 1 = low, 2 = full
     // legacy First Night Demo fields, kept so old saves keep working
     hasRibbon: false, sawMemory: false, wonOnce: false,
   };
@@ -84,6 +85,10 @@ function migrate(s) {
   // v4: Thread currency + Candle Cradle permanent upgrades
   if (typeof s.thread !== 'number') s.thread = 0;
   if (!s.cradle) s.cradle = {};
+  // audio settings
+  if (!s.settings) s.settings = { musicVol: 2, sfxVol: 2 };
+  if (typeof s.settings.musicVol !== 'number') s.settings.musicVol = 2;
+  if (typeof s.settings.sfxVol !== 'number') s.settings.sfxVol = 2;
   s.version = SAVE_VERSION;
   return s;
 }

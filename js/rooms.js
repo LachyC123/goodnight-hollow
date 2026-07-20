@@ -1,6 +1,6 @@
 // Room construction and rendering for the Dormitory and the five floors.
 import { SPR } from './sprites.js';
-import { TS, COLS, ROWS } from './world.js';
+import { TS, COLS, ROWS, solidAt } from './world.js';
 import {
   ButtonMouse, BlanketCrawler, CryingDoll, Nanny,
   ChalkWraith, DeskMimic, SpoonSwarm, PorridgeBlob, SheetGhost, MangleHound,
@@ -276,6 +276,37 @@ export function spawnEnemies(room, game) {
     else if (kind === 'cook') out.push(new Cook(game, p.x, p.y));
     else if (kind === 'laundress') out.push(new Laundress(game, p.x, p.y));
     else if (kind === 'mercy') out.push(new Mercy(game, p.x, p.y));
+  }
+  // difficulty: tougher enemies, and extra bodies once the house is awake
+  const diff = game.difficulty ? game.difficulty() : { hp: 1, count: 0 };
+  for (const e of out) {
+    if (!e.isBoss) { e.hp = Math.max(1, Math.round(e.hp * diff.hp)); e.maxHp = e.hp; }
+  }
+  if (room.type === 'combat' && diff.count > 0) {
+    for (let i = 0; i < diff.count; i++) {
+      // find an open tile — never spawn inside decor (it could stick and stall
+      // the room-clear check that opens the door)
+      let x = 0, y = 0, ok = false;
+      for (let tries = 0; tries < 24 && !ok; tries++) {
+        x = (3 + Math.random() * 22) * TS;
+        y = (2 + Math.random() * 10) * TS;
+        ok = !solidAt(room, x, y);
+      }
+      if (!ok) continue;
+      const extra = new ButtonMouse(game, x, y);
+      extra.hp = Math.max(1, Math.round(extra.hp * diff.hp));
+      out.push(extra);
+    }
+  }
+  // elites — a rare, meaner variant, more likely on later floors and as the
+  // house wakes. Never the crying dolls (a moral choice) or the boss.
+  if (room.type === 'combat') {
+    const chance = Math.min(0.4, 0.06 + ((room.night || 1) - 1) * 0.04 + (diff.aware || 0) / 400);
+    let made = 0;
+    for (const e of out) {
+      if (made >= 2) break;
+      if (!e.isBoss && !e.isDoll && !e.elite && Math.random() < chance) { e.makeElite(); made++; }
+    }
   }
   return out;
 }
